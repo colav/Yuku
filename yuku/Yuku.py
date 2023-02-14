@@ -6,7 +6,6 @@ from sodapy import Socrata
 from bs4 import BeautifulSoup
 import time
 import urllib3
-urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 
 class Yuku:
@@ -23,6 +22,7 @@ class Yuku:
         self.mlient = MongoClient(mongodb_uri)
         self.db = self.mlient[mongo_db]
         self.socrata_endpoint = socrata_endpoint
+        urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
     def download_cvlac(self, dataset_id: str):
         """
@@ -159,7 +159,7 @@ class Yuku:
             print(f"INFO: downloaded {counter}")
             self.db["gruplac_data_cache"].rename("gruplac_data")
 
-    def search_dataset(self, q: str, limit: int = 5):
+    def search(self, q: str, limit: int = 5):
         """
         Method to search datasets in socrata for the endpoint www.datos.gov.co
 
