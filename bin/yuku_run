@@ -20,11 +20,21 @@ parser.add_argument('--search_limit', type=int, default=5,
                           using elastic search, return number of elements indicated in --search_limit, by default it is 5')
 parser.add_argument('--drop_mongodb', action='store_true',
                     help='delete the database, use it with careful, deletes everything!')
+parser.add_argument('--download_cvlac', type=str,
+                    help='Download cvlac data for given dataset id and perform scrapping from public profiles in mincienias')
+parser.add_argument('--download_gruplac', type=str,
+                    help='Download gruplac data for given dataset id')
 
 
 if __name__ == '__main__':
     args = parser.parse_args()
     yuku = Yuku(args.mongo_dbname, args.mongo_dburi,
-                     args.socrata_endpoint)
+                args.socrata_endpoint)
     if args.search is not None:
         yuku.search(args.search, args.search_limit)
+    
+    if args.download_cvlac is not None:
+        yuku.download_cvlac(args.download_cvlac)
+
+    if args.download_gruplac is not None:
+        yuku.download_gruplac(args.download_gruplac)

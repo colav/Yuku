@@ -54,7 +54,11 @@ class Yuku:
         cod_rh = list(cod_rh)
         print(f"INFO: found {len(cod_rh_data)} records in data\n      found {len(cod_rh_stage)} in stage\n      found {len(cod_rh)} remain records to download.")
 
+        counter = 0
+        count = len(cod_rh)
         for cvlac in cod_rh:
+            if counter % 10 == 0:
+                print(f"INFO: Downloaded {counter} of {count}")
             url = f'{scienti_url}{cvlac}'
 
             dd = {'id_persona_pr': cvlac}
@@ -116,11 +120,13 @@ class Yuku:
                 ll = t.find_all('a')
                 for x in ll:
                     try:
-                        dd[re.search('\(([\w]+)\)', x.text).groups()[0]] = x['href']# noqa
+                        dd[re.search('\(([\w]+)\)', x.text).groups()[0]] = x['href']  # noqa
                     except Exception:
                         continue
             self.db["cvlac_stage"].insert_one(dd)
             time.sleep(0.3)
+            counter += 1
+        print(f"INFO: Downloaded {counter} of {count}")
 
     def download_gruplac(self, dataset_id: str):
         """
@@ -133,7 +139,7 @@ class Yuku:
             id for dataset in socrata ex: 33dq-ab5a
         """
         if "gruplac_dataset_info" in self.db.list_collection_names():
-            print("WARNING: cvlac_dataset_info already in the database, it will be not downloaded again, drop the database if you want start over.")
+            print("WARNING: gruplac_dataset_info already in the database, it will be not downloaded again, drop the database if you want start over.")
         else:
             print(f"INFO: downloading dataset metadata from id {dataset_id}")
             dataset_info = self.client.get_metadata(dataset_id)
@@ -147,16 +153,18 @@ class Yuku:
             data = []
             count = int(dataset['columns'][0]['cachedContents']['count'])
             print(f"INFO: Total groups found = {count}.")
-            counter = 0
+            counter = 1
             for i in cursor:
                 if counter % 20000 == 0:
-                    print(f"INFO: downloaded {counter}")
+                    print(f"INFO: downloaded {counter} of {count}")
                     self.db["gruplac_data_cache"].insert_many(data)
                     data = []
                 data.append(i)
+
                 counter += 1
+
             self.db["gruplac_data_cache"].insert_many(data)
-            print(f"INFO: downloaded {counter}")
+            print(f"INFO: downloaded {counter} of {count}")
             self.db["gruplac_data_cache"].rename("gruplac_data")
 
     def search(self, q: str, limit: int = 5):
