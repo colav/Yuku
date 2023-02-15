@@ -188,15 +188,19 @@ yuku> show collections
 cvlac_data
 cvlac_dataset_info
 cvlac_stage
-gruplac_data
-gruplac_dataset_info
+gruplac_groups_data
+gruplac_groups_dataset_info
+gruplac_production_data
+gruplac_production_dataset_info
 ```
 
 * cvlav_data: is the dataset for cvlac, downloaded from socrata (www.datos.gov.co)
 * cvlac_dataset_info: information about the dataset, this explains the fields and provide metadata about the cvlac dataset.
 * cvlac_stage: this is the collection for the scrapped data from cvlac (minciencias web site).
-* gruplac_data: is the dataset for gruplac, downloaded from socrata (www.datos.gov.co)
-* gruplac_dataset_info: information about the dataset, this explains the fields and provide metadata about the gruplac dataset.
+* gruplac_groups_data: is the dataset for gruplac groups, downloaded from socrata (www.datos.gov.co)
+* gruplac_groups_dataset_info: information about the dataset, this explains the fields and provide metadata about the gruplac groups dataset.
+* gruplac_production_data: is the dataset for gruplac production, downloaded from socrata (www.datos.gov.co)
+* gruplac_production_dataset_info: information about the dataset, this explains the fields and provide metadata about the gruplac production dataset.
 
 # License
 BSD-3-Clause License 
