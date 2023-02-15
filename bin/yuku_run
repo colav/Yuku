@@ -9,7 +9,7 @@ parser = argparse.ArgumentParser(description='Yuku Scienti')
 parser.add_argument('--mongo_dburi', type=str,
                     default='mongodb://localhost:27017/', help='uri for MongoDb database')
 parser.add_argument('--mongo_dbname', type=str,
-                    default="yuku_scienti", help='MongoDb name to save the data.')
+                    default="yuku", help='MongoDb name to save the data.')
 parser.add_argument('--socrata_endpoint', type=str,
                     default="www.datos.gov.co", help='Endpoint for minciencias in socrata server: default www.datos.gov.co')
 parser.add_argument('--search', type=str,
@@ -32,7 +32,7 @@ if __name__ == '__main__':
                 args.socrata_endpoint)
     if args.search is not None:
         yuku.search(args.search, args.search_limit)
-    
+
     if args.download_cvlac is not None:
         yuku.download_cvlac(args.download_cvlac)
 

@@ -12,6 +12,8 @@ We are downloading two datasets
 
 Additionally we are scrapping cvlac profiles of researches from scienti website.
 
+All the data is saved in MongoDB.
+
 # Installation
 
 ## Dependencies
@@ -130,6 +132,24 @@ The gruplac downlaod dont supports checkpoints, but it support pagination, the c
 `
 yuku_run --download_cvlac bqtm-4y2h
 `
+
+# Yuku Results
+
+By default the data is saved in the database yuku with the next collections:
+```
+yuku> show collections
+cvlac_data
+cvlac_dataset_info
+cvlac_stage
+gruplac_data
+gruplac_dataset_info
+```
+
+* cvlav_data: is the dataset for cvlac, downloaded from socrata (www.datos.gov.co)
+* cvlac_dataset_info: information about the dataset, this explains the fields and provide metadata about the cvlac dataset.
+* cvlac_stage: this is the collection for the scrapped data from cvlac (minciencias web site).
+* gruplac_data: is the dataset for gruplac, downloaded from socrata (www.datos.gov.co)
+* gruplac_dataset_info: information about the dataset, this explains the fields and provide metadata about the gruplac dataset.
 
 # License
 BSD-3-Clause License 
