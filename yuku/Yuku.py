@@ -36,13 +36,13 @@ class Yuku:
         """
         scienti_url = 'https://scienti.minciencias.gov.co/cvlac/visualizador/generarCurriculoCv.do?cod_rh='
         if "cvlac_dataset_info" in self.db.list_collection_names():
-            print("WARNING: cvlac_dataset_info already in the database, it will be not downloaded again, drop the database if you want start over.")
+            print("WARNING: cvlac_dataset_info already in the database, it wont be downloaded again, drop the database if you want start over.")
         else:
             print(f"INFO: downloading dataset metadata from id {dataset_id}")
             dataset_info = self.client.get_metadata(dataset_id)
             self.db["cvlac_dataset_info"].insert_one(dataset_info)
         if "cvlac_data" in self.db.list_collection_names():
-            print("WARNING: cvlac_data already in the database, it will be not downloaded again, drop the database if you want start over.")
+            print("WARNING: cvlac_data already in the database, it wont be downloaded again, drop the database if you want start over.")
         else:
             data = self.client.get_all(dataset_id)
             data = list(data)
@@ -128,9 +128,9 @@ class Yuku:
             counter += 1
         print(f"INFO: Downloaded {counter} of {count}")
 
-    def download_gruplac(self, dataset_id: str):
+    def download_gruplac_production(self, dataset_id: str):
         """
-        Method to download gruplac information.
+        Method to download gruplac production information.
         Unfortunately we dont have support for checkpoint in this method.
 
         Parameters:
@@ -138,34 +138,88 @@ class Yuku:
         dataset_id:str
             id for dataset in socrata ex: 33dq-ab5a
         """
-        if "gruplac_dataset_info" in self.db.list_collection_names():
-            print("WARNING: gruplac_dataset_info already in the database, it will be not downloaded again, drop the database if you want start over.")
+        if "gruplac_production_dataset_info" in self.db.list_collection_names():
+            print("WARNING: gruplac_production_dataset_info already in the database, it wont be downloaded again, drop the database if you want start over.")
         else:
             print(f"INFO: downloading dataset metadata from id {dataset_id}")
             dataset_info = self.client.get_metadata(dataset_id)
-            self.db["gruplac_dataset_info"].insert_one(dataset_info)
-        if "gruplac_data" in self.db.list_collection_names():
-            print("WARNING: gruplac_data already in the database, it will be not downloaded again, drop the database if you want start over.")
+            self.db["gruplac_production_dataset_info"].insert_one(dataset_info)
+        if "gruplac_production_data" in self.db.list_collection_names():
+            print("WARNING: gruplac_production_data already in the database, it wont be downloaded again, drop the database if you want start over.")
         else:
-            dataset = self.db["gruplac_dataset_info"].find_one()
-            self.db["gruplac_data_cache"].drop()
+            dataset = self.db["gruplac_production_dataset_info"].find_one()
+            self.db["gruplac_production_data_cache"].drop()
             cursor = self.client.get_all(dataset_id)
             data = []
             count = int(dataset['columns'][0]['cachedContents']['count'])
-            print(f"INFO: Total groups found = {count}.")
+            print(f"INFO: Total group products found = {count}.")
             counter = 1
             for i in cursor:
                 if counter % 20000 == 0:
                     print(f"INFO: downloaded {counter} of {count}")
-                    self.db["gruplac_data_cache"].insert_many(data)
+                    self.db["gruplac_production_data_cache"].insert_many(data)
                     data = []
                 data.append(i)
 
                 counter += 1
 
-            self.db["gruplac_data_cache"].insert_many(data)
+            self.db["gruplac_production_data_cache"].insert_many(data)
             print(f"INFO: downloaded {counter} of {count}")
-            self.db["gruplac_data_cache"].rename("gruplac_data")
+            self.db["gruplac_production_data_cache"].rename(
+                "gruplac_production_data")
+
+    def download_gruplac_groups(self, dataset_id: str):
+        """
+        Method to download gruplac groups information.
+        Unfortunately we dont have support for checkpoint in this method.
+
+        Parameters:
+        ------------
+        dataset_id:str
+            id for dataset in socrata ex: 33dq-ab5a
+        """
+        if "gruplac_groups_dataset_info" in self.db.list_collection_names():
+            print("WARNING: gruplac_groups_dataset_info already in the database, it wont be downloaded again, drop the database if you want start over.")
+        else:
+            print(f"INFO: downloading dataset metadata from id {dataset_id}")
+            dataset_info = self.client.get_metadata(dataset_id)
+            self.db["gruplac_groups_dataset_info"].insert_one(dataset_info)
+        if "gruplac_groups_data" in self.db.list_collection_names():
+            print("WARNING: gruplac_groups_data already in the database, it wont be downloaded again, drop the database if you want start over.")
+        else:
+            cursor = self.client.get_all(dataset_id)
+            data = list(cursor)
+            self.db["gruplac_groups_data"].insert_many(data)
+
+    def download(self, dataset_id: str, collection: str):
+        """
+        Method to download any dataset information/data.
+        Unfortunately we dont have support for checkpoint in this method.
+        This is a generic one, if the dataset is too big can take long time.
+
+        WARNING:  USE THIS METHOD WITH CAUTION, THIS IS NOT AN OPTIMIZED REQUEST, DOWNLOADED DATA IS SAVED IN RAM BEFORE SAVE IT IN MONGODB.
+
+        Parameters:
+        ------------
+        dataset_id:str
+            id for dataset in socrata ex: 33dq-ab5a
+        collection:str
+            name of the collection prefix to save dataset 
+        """
+        if f"{collection}_dataset_info" in self.db.list_collection_names():
+            print(
+                f"WARNING: {collection} already in the database, it wont be downloaded again, drop the collections if you want start over.")
+        else:
+            print(f"INFO: downloading dataset metadata from id {dataset_id}")
+            dataset_info = self.client.get_metadata(dataset_id)
+            self.db[f"{collection}_dataset_info"].insert_one(dataset_info)
+        if f"{collection}_data" in self.db.list_collection_names():
+            print(
+                "WARNING: {collection}_data already in the database, it wont be downloaded again, drop the collections if you want start over.")
+        else:
+            cursor = self.client.get_all(dataset_id)
+            data = list(cursor)
+            self.db[f"{collection}_data"].insert_many(data)
 
     def search(self, q: str, limit: int = 5):
         """
@@ -174,6 +228,7 @@ class Yuku:
         examples:
         * q="Investigadores Reconocidos por convocatoria"
         * q="Producción Grupos Investigación"
+        * q="Grupos de Investigación Reconocidos"
 
         Parameters:
         -----------

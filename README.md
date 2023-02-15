@@ -6,9 +6,10 @@ Scienti Open Data / Yuku, god of rain in Yaqui mythology in northern Mexico.
 
 # Description
 This package allows to download Scienti open data using socrata api service.
-We are downloading two datasets 
+We are downloading the next datasets 
 * "Investigadores Reconocidos por convocatoria"
 * "Producción Grupos Investigación"
+* "Grupos de Investigación Reconocidos"
 
 Additionally we are scrapping cvlac profiles of researches from scienti website.
 
@@ -78,7 +79,7 @@ createdAt:  2022-09-25T05:40:12.000Z
 
 ```
 
-Example to get dataset id for groups, in this example I took ID ex: 33dq-ab5a
+Example to get dataset id for groups production, in this example I took ID ex: 33dq-ab5a
 
 `
 yuku_run --search "Producción Grupos Investigación" --search_limit 3
@@ -117,20 +118,66 @@ createdAt:  2022-10-13T17:41:10.000Z
 
 ```
 
+
+Example to get dataset id for groups, in this example I took ID ex: hrhc-c4wu
+
+`
+yuku_run --search "Grupos de Investigación Reconocidos" --search_limit 3
+`
+
+Output:
+
+```
+WARNING:root:Requests made without an app_token will be subject to strict throttling limits.
+name:  Grupos de Investigación Reconocidos
+id:  hrhc-c4wu
+description:  Información de los grupos de investigación registrados en la Plataforma ScienTI - Colombia, avalados por una Institución, reconocidos y clasificados.
+attribution:  Ministerio de Ciencia y Tecnología e Innovación
+attribution_link:  https://www.minciencias.gov.co
+type:  dataset
+updatedAt:  2022-09-25T05:58:20.000Z
+createdAt:  2021-07-23T03:21:48.000Z
+
+name:  Grupos de Investigación reconocidos 2019
+id:  92tk-xn3q
+description:  Información de los grupos de investigación registrados en la Plataforma ScienTI - Colombia, avalados por una Institución, reconocidos y clasificados.
+attribution:  Ministerio de Ciencia y Tecnología e Innovación
+attribution_link:  https://www.minciencias.gov.co
+type:  chart
+updatedAt:  2022-09-25T06:00:48.000Z
+createdAt:  2021-07-27T02:45:43.000Z
+
+name:  Grupos de Investigación reconocidos 2021
+id:  b5ub-mixn
+description:  Información de los grupos de investigación registrados en la Plataforma ScienTI - Colombia, avalados por una Institución, reconocidos y clasificados.
+attribution:  Ministerio de Ciencia y Tecnología e Innovación
+attribution_link:  https://www.minciencias.gov.co
+type:  chart
+updatedAt:  2022-09-25T06:03:19.000Z
+createdAt:  2022-09-25T06:03:10.000Z
+```
+
+
 ## Download CVLAC data
 
-The cvlac downlaod supports checkpoints, it takes long time to download the profiles, about 9 hours.
+The cvlac download supports checkpoints, it takes long time to download the profiles, about 9 hours.
 
 `
 yuku_run --download_cvlac bqtm-4y2h
 `
 
-## Download GRUPLAC data
+## Download GRUPLAC production data
 
-The gruplac downlaod dont supports checkpoints, but it support pagination, the cache is saved in the collection gruplac_data_cache, but it is eventually removed if the execution fails.  This run takes about 1 hour.
-
+The gruplac download dont supports checkpoints, but it support pagination, the cache is saved in the collection gruplac_production_data_cache, but it is eventually removed if the execution fails.  This run takes about 1 hour.
 `
-yuku_run --download_cvlac 33dq-ab5a
+yuku_run --download_gruplac_production 33dq-ab5a
+`
+
+## Download GRUPLAC groups data
+
+The gruplac download dont supports checkpoints, but it support pagination, the cache is saved in the collection gruplac_data_cache, but it is eventually removed if the execution fails.  This run takes about 1 hour.
+`
+yuku_run --download_gruplac_production 33dq-ab5a
 `
 
 # Yuku Results

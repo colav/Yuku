@@ -22,9 +22,14 @@ parser.add_argument('--drop_mongodb', action='store_true',
                     help='delete the database, use it with careful, deletes everything!')
 parser.add_argument('--download_cvlac', type=str,
                     help='Download cvlac data for given dataset id and perform scrapping from public profiles in mincienias')
-parser.add_argument('--download_gruplac', type=str,
-                    help='Download gruplac data for given dataset id')
-
+parser.add_argument('--download_gruplac_production', type=str,
+                    help='Download gruplac production data for given dataset id')
+parser.add_argument('--download_gruplac_groups', type=str,
+                    help='Download gruplac groups data for given dataset id')
+parser.add_argument('--download', type=str,
+                    help='Download data for given dataset id')
+parser.add_argument('--download_collection', type=str,
+                    help='Collection name to --download')
 
 if __name__ == '__main__':
     args = parser.parse_args()
@@ -36,5 +41,14 @@ if __name__ == '__main__':
     if args.download_cvlac is not None:
         yuku.download_cvlac(args.download_cvlac)
 
-    if args.download_gruplac is not None:
-        yuku.download_gruplac(args.download_gruplac)
+    if args.download_gruplac_production is not None:
+        yuku.download_gruplac_production(args.download_gruplac_production)
+
+    if args.download_gruplac_groups is not None:
+        yuku.download_gruplac_groups(args.download_gruplac_groups)
+
+    if args.download is not None:
+        if args.download_collection is None:
+            print("ERROR: for option --download  a collection name have to be provide using --download_collection")
+        else:
+            yuku.download(args.download,args.download_collection)
