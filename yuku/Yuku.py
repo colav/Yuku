@@ -128,9 +128,9 @@ class Yuku:
             counter += 1
         print(f"INFO: Downloaded {counter} of {count}")
 
-    def download_gruplac(self, dataset_id: str):
+    def download_gruplac_production(self, dataset_id: str):
         """
-        Method to download gruplac information.
+        Method to download gruplac production information.
         Unfortunately we dont have support for checkpoint in this method.
 
         Parameters:
@@ -138,34 +138,58 @@ class Yuku:
         dataset_id:str
             id for dataset in socrata ex: 33dq-ab5a
         """
-        if "gruplac_dataset_info" in self.db.list_collection_names():
-            print("WARNING: gruplac_dataset_info already in the database, it will be not downloaded again, drop the database if you want start over.")
+        if "gruplac_production_dataset_info" in self.db.list_collection_names():
+            print("WARNING: gruplac_production_dataset_info already in the database, it will be not downloaded again, drop the database if you want start over.")
         else:
             print(f"INFO: downloading dataset metadata from id {dataset_id}")
             dataset_info = self.client.get_metadata(dataset_id)
-            self.db["gruplac_dataset_info"].insert_one(dataset_info)
-        if "gruplac_data" in self.db.list_collection_names():
-            print("WARNING: gruplac_data already in the database, it will be not downloaded again, drop the database if you want start over.")
+            self.db["gruplac_production_dataset_info"].insert_one(dataset_info)
+        if "gruplac_production_data" in self.db.list_collection_names():
+            print("WARNING: gruplac_production_data already in the database, it will be not downloaded again, drop the database if you want start over.")
         else:
-            dataset = self.db["gruplac_dataset_info"].find_one()
-            self.db["gruplac_data_cache"].drop()
+            dataset = self.db["gruplac_production_dataset_info"].find_one()
+            self.db["gruplac_production_data_cache"].drop()
             cursor = self.client.get_all(dataset_id)
             data = []
             count = int(dataset['columns'][0]['cachedContents']['count'])
-            print(f"INFO: Total groups found = {count}.")
+            print(f"INFO: Total group products found = {count}.")
             counter = 1
             for i in cursor:
                 if counter % 20000 == 0:
                     print(f"INFO: downloaded {counter} of {count}")
-                    self.db["gruplac_data_cache"].insert_many(data)
+                    self.db["gruplac_production_data_cache"].insert_many(data)
                     data = []
                 data.append(i)
 
                 counter += 1
 
-            self.db["gruplac_data_cache"].insert_many(data)
+            self.db["gruplac_production_data_cache"].insert_many(data)
             print(f"INFO: downloaded {counter} of {count}")
-            self.db["gruplac_data_cache"].rename("gruplac_data")
+            self.db["gruplac_production_data_cache"].rename(
+                "gruplac_production_data")        
+
+    def download_gruplac_groups(self, dataset_id: str):
+        """
+        Method to download gruplac groups information.
+        Unfortunately we dont have support for checkpoint in this method.
+
+        Parameters:
+        ------------
+        dataset_id:str
+            id for dataset in socrata ex: 33dq-ab5a
+        """
+        if "gruplac_groups_dataset_info" in self.db.list_collection_names():
+            print("WARNING: gruplac_groups_dataset_info already in the database, it will be not downloaded again, drop the database if you want start over.")
+        else:
+            print(f"INFO: downloading dataset metadata from id {dataset_id}")
+            dataset_info = self.client.get_metadata(dataset_id)
+            self.db["gruplac_groups_dataset_info"].insert_one(dataset_info)
+        if "gruplac_groups_data" in self.db.list_collection_names():
+            print("WARNING: gruplac_groups_data already in the database, it will be not downloaded again, drop the database if you want start over.")
+        else:
+            cursor = self.client.get_all(dataset_id)
+            data = list(cursor)
+            self.db["gruplac_groups_data"].insert_many(data)
 
     def search(self, q: str, limit: int = 5):
         """
@@ -174,6 +198,7 @@ class Yuku:
         examples:
         * q="Investigadores Reconocidos por convocatoria"
         * q="Producción Grupos Investigación"
+        * q="Grupos de Investigación Reconocidos"
 
         Parameters:
         -----------
