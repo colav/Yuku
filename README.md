@@ -130,12 +130,12 @@ yuku_run --download_cvlac bqtm-4y2h
 The gruplac downlaod dont supports checkpoints, but it support pagination, the cache is saved in the collection gruplac_data_cache, but it is eventually removed if the execution fails.  This run takes about 1 hour.
 
 `
-yuku_run --download_cvlac bqtm-4y2h
+yuku_run --download_cvlac 33dq-ab5a
 `
 
 # Yuku Results
 
-By default the data is saved in the database yuku with the next collections:
+By default the data is saved in the database **yuku** with the next collections:
 ```
 yuku> show collections
 cvlac_data
