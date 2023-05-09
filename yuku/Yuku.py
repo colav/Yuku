@@ -50,8 +50,14 @@ class Yuku:
             self.db["cvlac_data"].insert_many(data)
         cod_rh_data = self.db["cvlac_data"].distinct("id_persona_pr")
         cod_rh_stage = self.db["cvlac_stage"].distinct("id_persona_pr")
+        cod_rh_stage_priv = self.db["cvlac_stage_private"].distinct(
+            "id_persona_pr")
+        cod_rh_stage_empty = self.db["cvlac_stage_empty"].distinct(
+            "id_persona_pr")
+
         # computing the remaining ids for scrapping
-        cod_rh = set(cod_rh_data) - set(cod_rh_stage)
+        cod_rh = set(cod_rh_data) - set(cod_rh_stage) - \
+            set(cod_rh_stage_priv) - set(cod_rh_stage_empty)
         cod_rh = list(cod_rh)
         print(f"INFO: found {len(cod_rh_data)} records in data\n      found {len(cod_rh_stage)} in stage\n      found {len(cod_rh)} remain records to download.")
 
@@ -72,20 +78,28 @@ class Yuku:
 
             soup = BeautifulSoup(r.text, 'lxml')  # Parse the HTML as a string
 
-            data = {'id_persona_pr': cvlac, "url": url}
+            reg = {'id_persona_pr': cvlac, "url": url}
+            try:
+                # Datos Generales
+                a_tag = soup.find('a', {'name': 'datos_generales'})
+                table_tag = a_tag.find_next('table')
 
-            # Datos Generales
-            a_tag = soup.find('a', {'name': 'datos_generales'})
-            table_tag = a_tag.find_next('table')
+                if table_tag is None:
+                    print(
+                        f"WARNING: found empty id {cvlac}  with url = {url} ")
+                    self.db["cvlac_stage_empty"].insert_one(reg)
+                    continue
 
-            data['Nombre'] = ''
-
-            record = pd.read_html(table_tag.decode())[
-                0].to_dict(orient='records')
+                record = pd.read_html(table_tag.decode())[
+                    0].to_dict(orient='records')
+            except Exception as e:
+                print(f"Error processing id {cvlac}  with url = {url} ")
+                print(e, file=sys.stderr)
+                continue
 
             for d in record:
                 if d and isinstance(d.get(0), str) and isinstance(d.get(1), str):
-                    data[d.get(0)] = d.get(1).replace('\xa0', ' ')
+                    reg[d.get(0)] = d.get(1).replace('\xa0', ' ')
                 else:
                     continue
             try:
@@ -94,7 +108,7 @@ class Yuku:
                 if a_tag is None:
                     print(
                         f"WARNING: found private id {cvlac}  with url = {url} ")
-                    self.db["cvlac_stage_private"].insert_one(data)
+                    self.db["cvlac_stage_private"].insert_one(reg)
                     self.db["cvlac_stage_raw"].insert_one(
                         {"_id": cvlac, "html": r.text})
                     time.sleep(0.3)
@@ -104,7 +118,7 @@ class Yuku:
                 table_tag = a_tag.find_next('table')
                 record = table_tag.find_all('a')
                 for link in record:
-                    data[link.text] = link['href']
+                    reg[link.text] = link['href']
 
                 # Identificadores
                 a_tag = soup.find('a', {'name': 'red_identificadores'})
@@ -112,10 +126,10 @@ class Yuku:
                 record = table_tag.find_all('a')
                 for link in record:
                     try:
-                        data[re.search('\(([\w]+)\)', link.text).groups()
-                             [0]] = link['href']
+                        reg[re.search('\(([\w]+)\)', link.text).groups()
+                            [0]] = link['href']
                     except Exception:
-                        data[link.text] = link['href']
+                        reg[link.text] = link['href']
                         continue
 
                 # Formación académica
@@ -126,8 +140,8 @@ class Yuku:
                 for tag in record:
                     b_title = tag.find_all('b')
                     if len(b_title) > 0:
-                        data[b_title[0].text] = tag.text.split('\r\n')
-                self.db["cvlac_stage"].insert_one(data)
+                        reg[b_title[0].text] = tag.text.split('\r\n')
+                self.db["cvlac_stage"].insert_one(reg)
                 self.db["cvlac_stage_raw"].insert_one(
                     {"_id": cvlac, "html": r.text})
                 time.sleep(0.3)
