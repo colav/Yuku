@@ -188,6 +188,9 @@ yuku> show collections
 cvlac_data
 cvlac_dataset_info
 cvlac_stage
+cvlac_stage_empty
+cvlac_stage_private
+cvlac_stage_raw
 gruplac_groups_data
 gruplac_groups_dataset_info
 gruplac_production_data
