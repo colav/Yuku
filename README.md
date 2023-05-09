@@ -197,6 +197,9 @@ gruplac_production_dataset_info
 * cvlav_data: is the dataset for cvlac, downloaded from socrata (www.datos.gov.co)
 * cvlac_dataset_info: information about the dataset, this explains the fields and provide metadata about the cvlac dataset.
 * cvlac_stage: this is the collection for the scrapped data from cvlac (minciencias web site).
+* cvlac_stage_empty: Empty pages, not possible to do any scrapping
+* cvlac_stage_private: private profiles but still some basic information
+* cvlac_stage_raw: raw html text
 * gruplac_groups_data: is the dataset for gruplac groups, downloaded from socrata (www.datos.gov.co)
 * gruplac_groups_dataset_info: information about the dataset, this explains the fields and provide metadata about the gruplac groups dataset.
 * gruplac_production_data: is the dataset for gruplac production, downloaded from socrata (www.datos.gov.co)

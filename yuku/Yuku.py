@@ -6,6 +6,7 @@ from sodapy import Socrata
 from bs4 import BeautifulSoup
 import time
 import urllib3
+import sys
 
 
 class Yuku:
@@ -49,8 +50,14 @@ class Yuku:
             self.db["cvlac_data"].insert_many(data)
         cod_rh_data = self.db["cvlac_data"].distinct("id_persona_pr")
         cod_rh_stage = self.db["cvlac_stage"].distinct("id_persona_pr")
+        cod_rh_stage_priv = self.db["cvlac_stage_private"].distinct(
+            "id_persona_pr")
+        cod_rh_stage_empty = self.db["cvlac_stage_empty"].distinct(
+            "id_persona_pr")
+
         # computing the remaining ids for scrapping
-        cod_rh = set(cod_rh_data) - set(cod_rh_stage)
+        cod_rh = set(cod_rh_data) - set(cod_rh_stage) - \
+            set(cod_rh_stage_priv) - set(cod_rh_stage_empty)
         cod_rh = list(cod_rh)
         print(f"INFO: found {len(cod_rh_data)} records in data\n      found {len(cod_rh_stage)} in stage\n      found {len(cod_rh)} remain records to download.")
 
@@ -61,8 +68,6 @@ class Yuku:
                 print(f"INFO: Downloaded {counter} of {count}")
             url = f'{scienti_url}{cvlac}'
 
-            dd = {'id_persona_pr': cvlac}
-
             try:
                 r = requests.get(url, verify=False)
             except Exception:
@@ -72,60 +77,78 @@ class Yuku:
                 continue
 
             soup = BeautifulSoup(r.text, 'lxml')  # Parse the HTML as a string
-            tables = soup.find_all('table')
 
-            # 1: Full names
-            if len(tables) > 2:
-                t = tables[1]
-            else:
-                dd['nombre'] = ''
-                continue
+            reg = {'id_persona_pr': cvlac, "url": url}
+            try:
+                # Datos Generales
+                a_tag = soup.find('a', {'name': 'datos_generales'})
+                table_tag = a_tag.find_next('table')
 
-            tr = pd.read_html(t.decode())[0].to_dict(orient='records')
-
-            for d in tr:
-                if d and isinstance(d.get(0), str) and isinstance(d.get(1), str):
-                    dd[d.get(0)] = d.get(1).replace('\xa0', ' ')
-                else:
+                if table_tag is None:
+                    print(
+                        f"WARNING: found empty id {cvlac}  with url = {url} ")
+                    self.db["cvlac_stage_empty"].insert_one(reg)
                     continue
 
-            # 2. Academic Social Networks  and authors Ids
-            t = tables[2]
-
-            # 2.a) Academic Social Networks (Google Scholar)
-            next = 2
-            try:
-                ids = t.find_all('h3')[0].text
-            except Exception:
-                ids = ''
-            if ids == 'Redes sociales académicas':
-                next = 3
-                ll = t.find_all('a')
-                for x in ll:
-                    try:
-                        dd[x.text.split(' (')[0]] = x['href']
-                    except Exception:
-                        continue
-            # 2.b) authors Ids (ORCID, Scopus, ...)
-            try:
-                t = tables[next]
-            except Exception:
+                record = pd.read_html(table_tag.decode())[
+                    0].to_dict(orient='records')
+            except Exception as e:
+                print(f"Error processing id {cvlac}  with url = {url} ")
+                print(e, file=sys.stderr)
                 continue
 
+            for d in record:
+                if d and isinstance(d.get(0), str) and isinstance(d.get(1), str):
+                    reg[d.get(0)] = d.get(1).replace('\xa0', ' ')
+                else:
+                    continue
             try:
-                ids = t.find_all('h3')[0].text
-            except Exception:
-                ids = ''
-            if ids == 'Identificadores de autor':
-                ll = t.find_all('a')
-                for x in ll:
+                # Redes
+                a_tag = soup.find('a', {'name': 'redes_identificadoes'})
+                if a_tag is None:
+                    print(
+                        f"WARNING: found private id {cvlac}  with url = {url} ")
+                    self.db["cvlac_stage_private"].insert_one(reg)
+                    self.db["cvlac_stage_raw"].insert_one(
+                        {"_id": cvlac, "html": r.text})
+                    time.sleep(0.3)
+                    counter += 1
+                    continue
+
+                table_tag = a_tag.find_next('table')
+                record = table_tag.find_all('a')
+                for link in record:
+                    reg[link.text] = link['href']
+
+                # Identificadores
+                a_tag = soup.find('a', {'name': 'red_identificadores'})
+                table_tag = a_tag.find_next('table')
+                record = table_tag.find_all('a')
+                for link in record:
                     try:
-                        dd[re.search('\(([\w]+)\)', x.text).groups()[0]] = x['href']  # noqa
+                        reg[re.search('\(([\w]+)\)', link.text).groups()
+                            [0]] = link['href']
                     except Exception:
+                        reg[link.text] = link['href']
                         continue
-            self.db["cvlac_stage"].insert_one(dd)
-            time.sleep(0.3)
-            counter += 1
+
+                # Formación académica
+                a_tag = soup.find('a', {'name': 'formacion_acad'})
+                table_tag = a_tag.find_next('table')
+                record = table_tag.find_all('td')
+
+                for tag in record:
+                    b_title = tag.find_all('b')
+                    if len(b_title) > 0:
+                        reg[b_title[0].text] = tag.text.split('\r\n')
+                self.db["cvlac_stage"].insert_one(reg)
+                self.db["cvlac_stage_raw"].insert_one(
+                    {"_id": cvlac, "html": r.text})
+                time.sleep(0.3)
+                counter += 1
+            except Exception as e:
+                print(f"Error processing id {cvlac}  with url = {url} ")
+                print(e, file=sys.stderr)
         print(f"INFO: Downloaded {counter} of {count}")
 
     def download_gruplac_production(self, dataset_id: str):

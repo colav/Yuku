@@ -84,7 +84,8 @@ def main():
             'pandas',
             'requests>=2.22.0',
             'sodapy',
-            'beautifulsoup4'
+            'beautifulsoup4',
+            'lxml'
         ],
     )
 

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 from yuku.Yuku import Yuku
-
+from pymongo import MongoClient
 import argparse
 import faulthandler
 faulthandler.enable()
@@ -35,6 +35,9 @@ if __name__ == '__main__':
     args = parser.parse_args()
     yuku = Yuku(args.mongo_dbname, args.mongo_dburi,
                 args.socrata_endpoint)
+    
+    if args.drop_mongodb:
+        MongoClient(args.mongo_dburi).drop_database(args.mongo_dbname)
     if args.search is not None:
         yuku.search(args.search, args.search_limit)
 
