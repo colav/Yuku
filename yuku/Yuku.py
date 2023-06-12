@@ -40,10 +40,9 @@ class Yuku:
             True if the profile is private, False otherwise
         """
         blockquotes = soup.find_all('blockquote')
-        text_private = "La información de este currículo no está disponible por solicitud del investigador"
-        for i in blockquotes:
-            if text_private == i.text:
-                True
+        text_private = 'La información de este currículo no está disponible por solicitud del investigador'
+        if text_private == blockquotes[1].text:
+            return True
         return False
 
     def download_cvlac(self, dataset_id: str):
@@ -105,6 +104,7 @@ class Yuku:
                 # Datos Generales
                 a_tag = soup.find('a', {'name': 'datos_generales'}).parent
                 if a_tag is not None:
+                    # a_tag = a_tag
                     table_tag = a_tag.find_next('table')
 
                     if table_tag is None:
@@ -150,11 +150,7 @@ class Yuku:
                 if table_tag is not None:
                     record = table_tag.find_all('a')
                     for link in record:
-                        try:
-                            reg[re.search('\(([\w]+)\)', link.text).groups()
-                                [0]] = link['href']
-                        except Exception:
-                            reg[link.text] = link['href']
+                        reg[link.text] = link['href']
 
                 # Formación académica
                 a_tag = soup.find('a', {'name': 'formacion_acad'}).parent
