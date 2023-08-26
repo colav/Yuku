@@ -30,11 +30,13 @@ parser.add_argument('--download', type=str,
                     help='Download data for given dataset id')
 parser.add_argument('--download_collection', type=str,
                     help='Collection name to --download')
+parser.add_argument('--delay', type=float, default=0.3,
+                    help='delay between requests, default 0.3 seconds')
 
 if __name__ == '__main__':
     args = parser.parse_args()
     yuku = Yuku(args.mongo_dbname, args.mongo_dburi,
-                args.socrata_endpoint)
+                args.socrata_endpoint, args.delay)
     
     if args.drop_mongodb:
         MongoClient(args.mongo_dburi).drop_database(args.mongo_dbname)
