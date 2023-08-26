@@ -10,7 +10,7 @@ import sys
 
 
 class Yuku:
-    def __init__(self, mongo_db: str = "yuku", mongodb_uri: str = "mongodb://localhost:27017/", socrata_endpoint: str = "www.datos.gov.co"):
+    def __init__(self, mongo_db: str = "yuku", mongodb_uri: str = "mongodb://localhost:27017/", socrata_endpoint: str = "www.datos.gov.co", delay: float = 0.3):
         """
         Contructor for Yuku, we only support open datasets, credentials are not supported.
 
@@ -24,6 +24,7 @@ class Yuku:
         self.db = self.mlient[mongo_db]
         self.socrata_endpoint = socrata_endpoint
         urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+        self.delay = delay
 
     def cvlav_private_profile(self, soup: BeautifulSoup):
         """
@@ -202,7 +203,7 @@ class Yuku:
                 print(e, file=sys.stderr)
                 self.db["cvlac_stage_error"].insert_one(
                     {"url": url, "status_code": r.status_code, "error": r.text})
-            time.sleep(0.1)
+            time.sleep(self.delay)
             counter += 1
         print(f"INFO: Downloaded {counter} of {count}")
 
