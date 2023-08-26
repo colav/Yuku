@@ -90,7 +90,17 @@ class Yuku:
 
             try:
                 r = requests.get(url, verify=False)
-            except Exception:
+            except Exception as e:
+                print(e, file=sys.stderr)
+                self.db["cvlac_stage_error"].insert_one(
+                    {"url": url, "status_code": r.status_code, "error": r.text})
+                continue
+
+            if r.status_code != 200:
+                print(
+                    f"Error processing id {cvlac}  with url = {url} status code = {r.status_code} ")
+                self.db["cvlac_stage_error"].insert_one(
+                    {"url": url, "status_code": r.status_code, "error": r.text})
                 continue
 
             if not r.text:
@@ -101,7 +111,7 @@ class Yuku:
             reg = {'id_persona_pr': cvlac, "url": url}
             record = {}
             try:
-                # Datos Generales
+                # Datos Generales (checking if the page is empty)
                 a_tag = soup.find('a', {'name': 'datos_generales'}).parent
                 if a_tag is not None:
                     # a_tag = a_tag
@@ -112,19 +122,32 @@ class Yuku:
                             f"WARNING: found empty id {cvlac}  with url = {url} ")
                         self.db["cvlac_stage_empty"].insert_one(reg)
                         continue
-                    record = pd.read_html(table_tag.decode())[
+                    record['datos_generales'] = pd.read_html(table_tag.decode())[
                         0].to_dict(orient='records')
             except Exception as e:
                 print(f"Error processing id {cvlac}  with url = {url} ")
+                print("="*20)
+                print(r.text)
+                print("="*20)
                 print(e, file=sys.stderr)
+                self.db["cvlac_stage_error"].insert_one(
+                    {"url": url, "status_code": r.status_code, "error": r.text})
                 continue
+            # Datos Generales (Extracting data if not empty)
+            a_tag = soup.find('a', {'name': 'datos_generales'})
+            table_tag = a_tag.find_next('table')
+            reg['datos_generales'] = {}
+            reg['datos_generales']['Nombre'] = ''
+
+            record = pd.read_html(table_tag.decode())[
+                0].to_dict(orient='records')
 
             for d in record:
                 if d and isinstance(d.get(0), str) and isinstance(d.get(1), str):
-                    reg[d.get(0)] = d.get(1).replace('\xa0', ' ')
+                    reg['datos_generales'][d.get(0)] = d.get(
+                        1).replace('\xa0', ' ')
                 else:
                     continue
-
             if self.cvlav_private_profile(soup):
                 print(
                     f"WARNING: found private id {cvlac}  with url = {url} ")
@@ -137,38 +160,49 @@ class Yuku:
 
             try:
                 # Redes
-                a_tag = soup.find('a', {'name': 'redes_identificadoes'}).parent
-                table_tag = a_tag.find('table')
+                a_tag = soup.find('a', {'name': 'redes_identificadoes'})
+                table_tag = a_tag.find_next('table')
+                record = table_tag.find_all('a')
+                reg['redes_identificadoes'] = {}
+
                 if table_tag is not None:
                     record = table_tag.find_all('a')
                     for link in record:
-                        reg[link.text] = link['href']
+                        reg['redes_identificadoes'][link.text] = link['href']
 
                 # Identificadores
-                a_tag = soup.find('a', {'name': 'red_identificadores'}).parent
-                table_tag = a_tag.find('table')
+                a_tag = soup.find('a', {'name': 'red_identificadores'})
+                table_tag = a_tag.find_next('table')
+                record = table_tag.find_all('a')
+
+                reg['red_identificadores'] = {}
                 if table_tag is not None:
                     record = table_tag.find_all('a')
                     for link in record:
-                        reg[link.text] = link['href']
+                        reg['red_identificadores'][link.text] = link['href']
 
                 # Formación académica
-                a_tag = soup.find('a', {'name': 'formacion_acad'}).parent
-                table_tag = a_tag.find('table')
+                a_tag = soup.find('a', {'name': 'formacion_acad'})
+                table_tag = a_tag.find_next('table')
+                record = table_tag.find_all('td')
+                reg['formacion_acad'] = {}
                 if table_tag is not None:
                     record = table_tag.find_all('td')
 
                     for tag in record:
                         b_title = tag.find_all('b')
                         if len(b_title) > 0:
-                            reg[b_title[0].text] = tag.text.split('\r\n')
+                            reg['formacion_acad'][b_title[0].text] = tag.text.split(
+                                '\r\n')
                     self.db["cvlac_stage"].insert_one(reg)
                     self.db["cvlac_stage_raw"].insert_one(
                         {"_id": cvlac, "html": r.text})
             except Exception as e:
                 print(f"Error processing id {cvlac}  with url = {url} ")
                 print(e, file=sys.stderr)
-            time.sleep(0.3)
+                self.db["cvlac_stage_error"].insert_one(
+                    {"url": url, "status_code": r.status_code, "error": r.text})
+            time.sleep(0.1)
             counter += 1
         print(f"INFO: Downloaded {counter} of {count}")
 
