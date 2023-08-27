@@ -1,5 +1,4 @@
 import requests
-import re
 import pandas as pd
 from pymongo import MongoClient
 from sodapy import Socrata
@@ -94,14 +93,14 @@ class Yuku:
             except Exception as e:
                 print(e, file=sys.stderr)
                 self.db["cvlac_stage_error"].insert_one(
-                    {"url": url, "status_code": r.status_code, "error": r.text, "exception": str(e)})
+                    {"url": url, "status_code": r.status_code, "html": r.text, "exception": str(e)})
                 continue
 
             if r.status_code != 200:
                 print(
                     f"Error processing id {cvlac}  with url = {url} status code = {r.status_code} ")
                 self.db["cvlac_stage_error"].insert_one(
-                    {"url": url, "status_code": r.status_code, "error": r.text, "exception": str(e)})
+                    {"url": url, "status_code": r.status_code, "html": r.text})
                 continue
 
             if not r.text:
@@ -127,9 +126,9 @@ class Yuku:
                         0].to_dict(orient='records')
             except Exception as e:
                 print(f"Error processing id {cvlac}  with url = {url} ")
-                print("="*20)
+                print("=" * 20)
                 print(r.text)
-                print("="*20)
+                print("=" * 20)
                 print(e, file=sys.stderr)
                 self.db["cvlac_stage_error"].insert_one(
                     {"url": url, "status_code": r.status_code, "html": r.text, "exception": str(e)})
@@ -289,7 +288,7 @@ class Yuku:
         dataset_id:str
             id for dataset in socrata ex: 33dq-ab5a
         collection:str
-            name of the collection prefix to save dataset 
+            name of the collection prefix to save dataset
         """
         if f"{collection}_dataset_info" in self.db.list_collection_names():
             print(
