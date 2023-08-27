@@ -94,14 +94,14 @@ class Yuku:
             except Exception as e:
                 print(e, file=sys.stderr)
                 self.db["cvlac_stage_error"].insert_one(
-                    {"url": url, "status_code": r.status_code, "error": r.text})
+                    {"url": url, "status_code": r.status_code, "error": r.text, "exception": str(e)})
                 continue
 
             if r.status_code != 200:
                 print(
                     f"Error processing id {cvlac}  with url = {url} status code = {r.status_code} ")
                 self.db["cvlac_stage_error"].insert_one(
-                    {"url": url, "status_code": r.status_code, "error": r.text})
+                    {"url": url, "status_code": r.status_code, "error": r.text, "exception": str(e)})
                 continue
 
             if not r.text:
@@ -132,7 +132,7 @@ class Yuku:
                 print("="*20)
                 print(e, file=sys.stderr)
                 self.db["cvlac_stage_error"].insert_one(
-                    {"url": url, "status_code": r.status_code, "error": r.text})
+                    {"url": url, "status_code": r.status_code, "html": r.text, "exception": str(e)})
                 continue
             # Datos Generales (Extracting data if not empty)
             a_tag = soup.find('a', {'name': 'datos_generales'})
@@ -149,16 +149,22 @@ class Yuku:
                         1).replace('\xa0', ' ')
                 else:
                     continue
-            if self.cvlav_private_profile(soup):
-                print(
-                    f"WARNING: found private id {cvlac}  with url = {url} ")
-                self.db["cvlac_stage_private"].insert_one(reg)
-                self.db["cvlac_stage_raw"].insert_one(
-                    {"_id": cvlac, "html": r.text})
-                time.sleep(0.3)
-                counter += 1
+            try:
+                if self.cvlav_private_profile(soup):
+                    print(
+                        f"WARNING: found private id {cvlac}  with url = {url} ")
+                    self.db["cvlac_stage_private"].insert_one(reg)
+                    self.db["cvlac_stage_raw"].insert_one(
+                        {"_id": cvlac, "html": r.text})
+                    time.sleep(self.delay)
+                    counter += 1
+                    continue
+            except Exception as e:
+                print(f"Error processing id {cvlac}  with url = {url} ")
+                print(e, file=sys.stderr)
+                self.db["cvlac_stage_error"].insert_one(
+                    {"url": url, "status_code": r.status_code, "html": r.text, "exception": str(e)})
                 continue
-
             try:
                 # Redes
                 a_tag = soup.find('a', {'name': 'redes_identificadoes'})
@@ -202,7 +208,7 @@ class Yuku:
                 print(f"Error processing id {cvlac}  with url = {url} ")
                 print(e, file=sys.stderr)
                 self.db["cvlac_stage_error"].insert_one(
-                    {"url": url, "status_code": r.status_code, "error": r.text})
+                    {"url": url, "status_code": r.status_code, "html": r.text, "exception": str(e)})
             time.sleep(self.delay)
             counter += 1
         print(f"INFO: Downloaded {counter} of {count}")
