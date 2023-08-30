@@ -93,14 +93,14 @@ class Yuku:
             except Exception as e:
                 print(e, file=sys.stderr)
                 self.db["cvlac_stage_error"].insert_one(
-                    {"url": url, "status_code": r.status_code, "html": r.text, "exception": str(e)})
+                    {"url": url, "id_persona_pr":cvlac, "status_code": r.status_code, "html": r.text, "exception": str(e)})
                 continue
 
             if r.status_code != 200:
                 print(
                     f"Error processing id {cvlac}  with url = {url} status code = {r.status_code} ")
                 self.db["cvlac_stage_error"].insert_one(
-                    {"url": url, "status_code": r.status_code, "html": r.text})
+                    {"url": url, "id_persona_pr":cvlac, "status_code": r.status_code, "html": r.text})
                 continue
 
             if not r.text:
@@ -131,7 +131,7 @@ class Yuku:
                 print("=" * 20)
                 print(e, file=sys.stderr)
                 self.db["cvlac_stage_error"].insert_one(
-                    {"url": url, "status_code": r.status_code, "html": r.text, "exception": str(e)})
+                    {"url": url, "id_persona_pr":cvlac, "status_code": r.status_code, "html": r.text, "exception": str(e)})
                 continue
             # Datos Generales (Extracting data if not empty)
             a_tag = soup.find('a', {'name': 'datos_generales'})
@@ -162,7 +162,7 @@ class Yuku:
                 print(f"Error processing id {cvlac}  with url = {url} ")
                 print(e, file=sys.stderr)
                 self.db["cvlac_stage_error"].insert_one(
-                    {"url": url, "status_code": r.status_code, "html": r.text, "exception": str(e)})
+                    {"url": url, "id_persona_pr":cvlac, "status_code": r.status_code, "html": r.text, "exception": str(e)})
                 continue
             try:
                 # Redes
@@ -207,7 +207,7 @@ class Yuku:
                 print(f"Error processing id {cvlac}  with url = {url} ")
                 print(e, file=sys.stderr)
                 self.db["cvlac_stage_error"].insert_one(
-                    {"url": url, "status_code": r.status_code, "html": r.text, "exception": str(e)})
+                    {"url": url, "id_persona_pr":cvlac, "status_code": r.status_code, "html": r.text, "exception": str(e)})
             time.sleep(self.delay)
             counter += 1
         print(f"INFO: Downloaded {counter} of {count}")
