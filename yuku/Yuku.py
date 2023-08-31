@@ -105,14 +105,14 @@ class Yuku:
                 except Exception as e:
                     print(e, file=sys.stderr)
                     self.db["cvlac_stage_error"].insert_one(
-                        {"url": url, "id_persona_pr":cvlac, "status_code": r.status_code, "html": html, "exception": str(e)})
+                        {"url": url, "id_persona_pr": cvlac, "status_code": r.status_code, "html": html, "exception": str(e)})
                     continue
 
                 if r.status_code != 200:
                     print(
                         f"Error processing id {cvlac}  with url = {url} status code = {r.status_code} ")
                     self.db["cvlac_stage_error"].insert_one(
-                        {"url": url, "id_persona_pr":cvlac, "status_code": r.status_code, "html": html})
+                        {"url": url, "id_persona_pr": cvlac, "status_code": r.status_code, "html": html})
                     continue
 
             if not html:
@@ -143,7 +143,7 @@ class Yuku:
                 print("=" * 20)
                 print(e, file=sys.stderr)
                 self.db["cvlac_stage_error"].insert_one(
-                    {"url": url, "id_persona_pr":cvlac, "status_code": r.status_code, "html": html, "exception": str(e)})
+                    {"url": url, "id_persona_pr": cvlac, "status_code": r.status_code, "html": html, "exception": str(e)})
                 continue
             # Datos Generales (Extracting data if not empty)
             a_tag = soup.find('a', {'name': 'datos_generales'})
@@ -174,7 +174,7 @@ class Yuku:
                 print(f"Error processing id {cvlac}  with url = {url} ")
                 print(e, file=sys.stderr)
                 self.db["cvlac_stage_error"].insert_one(
-                    {"url": url, "id_persona_pr":cvlac, "status_code": r.status_code, "html": html, "exception": str(e)})
+                    {"url": url, "id_persona_pr": cvlac, "status_code": r.status_code, "html": html, "exception": str(e)})
                 continue
             try:
                 # Redes
@@ -208,19 +208,35 @@ class Yuku:
                         if len(b_title) > 0:
                             reg['formacion_acad'][b_title[0].text] = tag.text.split(
                                 '\r\n')
-                    self.db["cvlac_stage"].insert_one(reg)
-                    if use_raw is False:
-                        self.db["cvlac_stage_raw"].insert_one(
-                            {"_id": cvlac, "html": html})
+
+                # Experiencia laboral
+                a_tag = soup.find('a', {'name': 'experiencia'}).parent
+                table_tag = a_tag.find('table')
+                reg['experiencia'] = {}
+                if table_tag is not None:
+                    record = table_tag.find_all('td')
+                    for tag in record:
+                        b_title = tag.find_all('b')
+                        if len(b_title) > 0:
+                            data = []
+                            for i in tag.text.replace('\xa0', ' ').split('\r\n'):
+                                for j in i.split('\n'):
+                                    data.append(j)
+                            reg['experiencia'][b_title[0].text] = data
+
+                self.db["cvlac_stage"].insert_one(reg)
+                if use_raw is False:
+                    self.db["cvlac_stage_raw"].insert_one(
+                        {"_id": cvlac, "html": html})
             except Exception as e:
                 print(f"Error processing id {cvlac}  with url = {url} ")
                 print(e, file=sys.stderr)
                 if use_raw:
                     self.db["cvlac_stage_error"].insert_one(
-                        {"url": url, "id_persona_pr":cvlac, "status_code": "from raw", "html": html, "exception": str(e)})
+                        {"url": url, "id_persona_pr": cvlac, "status_code": "from raw", "html": html, "exception": str(e)})
                 else:
                     self.db["cvlac_stage_error"].insert_one(
-                        {"url": url, "id_persona_pr":cvlac, "status_code": r.status_code, "html": html, "exception": str(e)})
+                        {"url": url, "id_persona_pr": cvlac, "status_code": r.status_code, "html": html, "exception": str(e)})
             if use_raw is False:
                 time.sleep(self.delay)
             counter += 1
