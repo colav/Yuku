@@ -45,7 +45,7 @@ class Yuku:
             return True
         return False
 
-    def download_cvlac(self, dataset_id: str):
+    def download_cvlac(self, dataset_id: str, use_raw: bool = False):
         """
         Method to download cvlav information.
         This can take long time, but if something goes wrong we support checkpoint.
@@ -68,6 +68,7 @@ class Yuku:
             data = self.client.get_all(dataset_id)
             data = list(data)
             self.db["cvlac_data"].insert_many(data)
+
         cod_rh_data = self.db["cvlac_data"].distinct("id_persona_pr")
         cod_rh_stage = self.db["cvlac_stage"].distinct("id_persona_pr")
         cod_rh_stage_priv = self.db["cvlac_stage_private"].distinct(
@@ -85,28 +86,39 @@ class Yuku:
         count = len(cod_rh)
         for cvlac in cod_rh:
             if counter % 10 == 0:
-                print(f"INFO: Downloaded {counter} of {count}")
+                if use_raw:
+                    print(f"INFO: Parsed {counter} of {count} from raw")
+                else:
+                    print(f"INFO: Downloaded {counter} of {count}")
             url = f'{scienti_url}{cvlac}'
+            if use_raw:
+                r = self.db["cvlac_stage_raw"].find_one({"_id": cvlac})
+                if r is None:
+                    print(f"WARNING: not found id {cvlac}  in raw collection ")
+                    continue
+                else:
+                    html = r['html']
+            else:
+                try:
+                    r = requests.get(url, verify=False)
+                    html = r.text
+                except Exception as e:
+                    print(e, file=sys.stderr)
+                    self.db["cvlac_stage_error"].insert_one(
+                        {"url": url, "id_persona_pr": cvlac, "status_code": r.status_code, "html": html, "exception": str(e)})
+                    continue
 
-            try:
-                r = requests.get(url, verify=False)
-            except Exception as e:
-                print(e, file=sys.stderr)
-                self.db["cvlac_stage_error"].insert_one(
-                    {"url": url, "status_code": r.status_code, "html": r.text, "exception": str(e)})
+                if r.status_code != 200:
+                    print(
+                        f"Error processing id {cvlac}  with url = {url} status code = {r.status_code} ")
+                    self.db["cvlac_stage_error"].insert_one(
+                        {"url": url, "id_persona_pr": cvlac, "status_code": r.status_code, "html": html})
+                    continue
+
+            if not html:
                 continue
 
-            if r.status_code != 200:
-                print(
-                    f"Error processing id {cvlac}  with url = {url} status code = {r.status_code} ")
-                self.db["cvlac_stage_error"].insert_one(
-                    {"url": url, "status_code": r.status_code, "html": r.text})
-                continue
-
-            if not r.text:
-                continue
-
-            soup = BeautifulSoup(r.text, 'lxml')  # Parse the HTML as a string
+            soup = BeautifulSoup(html, 'lxml')  # Parse the HTML as a string
 
             reg = {'id_persona_pr': cvlac, "url": url}
             record = {}
@@ -127,11 +139,11 @@ class Yuku:
             except Exception as e:
                 print(f"Error processing id {cvlac}  with url = {url} ")
                 print("=" * 20)
-                print(r.text)
+                print(html)
                 print("=" * 20)
                 print(e, file=sys.stderr)
                 self.db["cvlac_stage_error"].insert_one(
-                    {"url": url, "status_code": r.status_code, "html": r.text, "exception": str(e)})
+                    {"url": url, "id_persona_pr": cvlac, "status_code": r.status_code, "html": html, "exception": str(e)})
                 continue
             # Datos Generales (Extracting data if not empty)
             a_tag = soup.find('a', {'name': 'datos_generales'})
@@ -154,7 +166,7 @@ class Yuku:
                         f"WARNING: found private id {cvlac}  with url = {url} ")
                     self.db["cvlac_stage_private"].insert_one(reg)
                     self.db["cvlac_stage_raw"].insert_one(
-                        {"_id": cvlac, "html": r.text})
+                        {"_id": cvlac, "html": html})
                     time.sleep(self.delay)
                     counter += 1
                     continue
@@ -162,13 +174,12 @@ class Yuku:
                 print(f"Error processing id {cvlac}  with url = {url} ")
                 print(e, file=sys.stderr)
                 self.db["cvlac_stage_error"].insert_one(
-                    {"url": url, "status_code": r.status_code, "html": r.text, "exception": str(e)})
+                    {"url": url, "id_persona_pr": cvlac, "status_code": r.status_code, "html": html, "exception": str(e)})
                 continue
             try:
                 # Redes
-                a_tag = soup.find('a', {'name': 'redes_identificadoes'})
-                table_tag = a_tag.find_next('table')
-                record = table_tag.find_all('a')
+                a_tag = soup.find('a', {'name': 'redes_identificadoes'}).parent
+                table_tag = a_tag.find('table')
                 reg['redes_identificadoes'] = {}
 
                 if table_tag is not None:
@@ -177,9 +188,8 @@ class Yuku:
                         reg['redes_identificadoes'][link.text] = link['href']
 
                 # Identificadores
-                a_tag = soup.find('a', {'name': 'red_identificadores'})
-                table_tag = a_tag.find_next('table')
-                record = table_tag.find_all('a')
+                a_tag = soup.find('a', {'name': 'red_identificadores'}).parent
+                table_tag = a_tag.find('table')
 
                 reg['red_identificadores'] = {}
                 if table_tag is not None:
@@ -188,27 +198,61 @@ class Yuku:
                         reg['red_identificadores'][link.text] = link['href']
 
                 # Formación académica
-                a_tag = soup.find('a', {'name': 'formacion_acad'})
-                table_tag = a_tag.find_next('table')
-                record = table_tag.find_all('td')
+                a_tag = soup.find('a', {'name': 'formacion_acad'}).parent
+                table_tag = a_tag.find('table')
                 reg['formacion_acad'] = {}
                 if table_tag is not None:
                     record = table_tag.find_all('td')
-
                     for tag in record:
                         b_title = tag.find_all('b')
                         if len(b_title) > 0:
                             reg['formacion_acad'][b_title[0].text] = tag.text.split(
                                 '\r\n')
-                    self.db["cvlac_stage"].insert_one(reg)
+
+                # Experiencia laboral
+                a_tag = soup.find('a', {'name': 'experiencia'}).parent
+                table_tag = a_tag.find('table')
+                reg['experiencia'] = {}
+                if table_tag is not None:
+                    record = table_tag.find_all('td')
+                    for tag in record:
+                        b_title = tag.find_all('b')
+                        if len(b_title) > 0:
+                            reg['experiencia'][b_title[0].text] = {}
+
+                            data0 = tag.text.replace('\xa0', ' ').split(
+                                'Actividades de administración')
+                            reg['experiencia'][b_title[0].text]["General"] = data0[0].split(
+                                "\r\n")
+                            if len(data0) > 1:
+                                data1 = data0[1].split(
+                                    'Actividades de docencia')
+                                reg['experiencia'][b_title[0].text]['Actividades de administración'] = data1[0].split(
+                                    "\r\n")
+                                if len(data1) > 1:
+                                    data2 = data1[1].split(
+                                        'Actividades de investigación')
+                                    reg['experiencia'][b_title[0].text]['Actividades de docencia'] = data2[0].split(
+                                        "\r\n")
+                                    if len(data2) > 1:
+                                        reg['experiencia'][b_title[0].text]['Actividades de investigación'] = data2[1].split(
+                                            "\r\n")
+
+                self.db["cvlac_stage"].insert_one(reg)
+                if use_raw is False:
                     self.db["cvlac_stage_raw"].insert_one(
-                        {"_id": cvlac, "html": r.text})
+                        {"_id": cvlac, "html": html})
             except Exception as e:
                 print(f"Error processing id {cvlac}  with url = {url} ")
                 print(e, file=sys.stderr)
-                self.db["cvlac_stage_error"].insert_one(
-                    {"url": url, "status_code": r.status_code, "html": r.text, "exception": str(e)})
-            time.sleep(self.delay)
+                if use_raw:
+                    self.db["cvlac_stage_error"].insert_one(
+                        {"url": url, "id_persona_pr": cvlac, "status_code": "from raw", "html": html, "exception": str(e)})
+                else:
+                    self.db["cvlac_stage_error"].insert_one(
+                        {"url": url, "id_persona_pr": cvlac, "status_code": r.status_code, "html": html, "exception": str(e)})
+            if use_raw is False:
+                time.sleep(self.delay)
             counter += 1
         print(f"INFO: Downloaded {counter} of {count}")
 
