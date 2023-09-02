@@ -218,11 +218,25 @@ class Yuku:
                     for tag in record:
                         b_title = tag.find_all('b')
                         if len(b_title) > 0:
-                            data = []
-                            for i in tag.text.replace('\xa0', ' ').split('\r\n'):
-                                for j in i.split('\n'):
-                                    data.append(j)
-                            reg['experiencia'][b_title[0].text] = data
+                            reg['experiencia'][b_title[0].text] = {}
+
+                            data0 = tag.text.replace('\xa0', ' ').split(
+                                'Actividades de administración')
+                            reg['experiencia'][b_title[0].text]["General"] = data0[0].split(
+                                "\r\n")
+                            if len(data0) > 1:
+                                data1 = data0[1].split(
+                                    'Actividades de docencia')
+                                reg['experiencia'][b_title[0].text]['Actividades de administración'] = data1[0].split(
+                                    "\r\n")
+                                if len(data1) > 1:
+                                    data2 = data1[1].split(
+                                        'Actividades de investigación')
+                                    reg['experiencia'][b_title[0].text]['Actividades de docencia'] = data2[0].split(
+                                        "\r\n")
+                                    if len(data2) > 1:
+                                        reg['experiencia'][b_title[0].text]['Actividades de investigación'] = data2[1].split(
+                                            "\r\n")
 
                 self.db["cvlac_stage"].insert_one(reg)
                 if use_raw is False:
