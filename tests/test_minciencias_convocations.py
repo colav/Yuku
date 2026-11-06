@@ -195,6 +195,34 @@ class Extraer2006Test(unittest.TestCase):
         self.assertEqual(fila.lider, "Eduardo Domínguez Gómez")
 
 
+class IdentidadInvestigadorTest(unittest.TestCase):
+    """Los identificadores deben coincidir con investigadores.json publicado."""
+
+    def fila(self, documento, categoria="Investigador Junior (IJ)"):
+        return mc.InvestigadorFila(
+            documento_original=documento,
+            documento_normalizado=documento,
+            tipo_documento="Cédula de ciudadanía",
+            categoria=categoria,
+            pagina=1,
+            orden_fuente=1,
+        )
+
+    def test_ids_match_published_identifiers(self):
+        investigadores, _ = mc.consolidar_investigadores(
+            [
+                (fuente(833, 2018), [self.fila("0010411810037X")]),
+                (fuente(781, 2017), [self.fila("000000", "Investigador Sénior (IS)")]),
+            ]
+        )
+        ids = {
+            item["documento_normalizado"]: item["investigador_id"]
+            for item in investigadores
+        }
+        self.assertEqual(ids["0010411810037X"], "INV-2CE51B4CE372AF44")
+        self.assertEqual(ids["000000"], "INV-1162CDA760108D76")
+
+
 @unittest.skipUnless(
     os.environ.get("YUKU_CONVOCATORIAS_DIR"),
     "definir YUKU_CONVOCATORIAS_DIR con la carpeta Convocatorias para la integración",

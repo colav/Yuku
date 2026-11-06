@@ -1015,14 +1015,14 @@ def consolidar_investigadores(
                 contador_clave = (fuente.sha256, fila.documento_normalizado)
                 ceros_por_fuente[contador_clave] += 1
                 identidad = (
-                    f"CERO: {fuente.convocatoria.etiqueta}: {fila.documento_normalizado}: "
+                    f"CERO:{fuente.convocatoria.etiqueta}:{fila.documento_normalizado}:"
                     f"{ceros_por_fuente[contador_clave]}"
                 )
             else:
                 # El número normalizado es la única clave transversal presente
                 # en todas las convocatorias. Los tipos históricos se conservan
                 # y sus inconsistencias se documentan, sin romper la trayectoria.
-                identidad = f"DOC: {fila.documento_normalizado}"
+                identidad = f"DOC:{fila.documento_normalizado}"
             detalles_agrupados[(identidad, fuente.convocatoria.etiqueta)].append(
                 (fuente, fila)
             )
