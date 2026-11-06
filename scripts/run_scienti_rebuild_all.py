@@ -16,6 +16,7 @@ import traceback
 from zoneinfo import ZoneInfo
 
 ROOT = Path(__file__).resolve().parents[1]
+CONVOCATIONS_DIR = Path('/home/fvergara/projects/colav/data/minciencias')
 
 
 def now():
@@ -185,10 +186,17 @@ def prepare(args, directory):
         config = json.loads(path.read_text())
         if config['run_name'] != args.run_name:
             raise RuntimeError('Output directory belongs to another run')
+        if config['collections']['recognized_groups'] != args.recognized_groups:
+            raise RuntimeError('Output directory uses another recognized-groups collection')
         return
+    for value in (args.groups_json, args.researchers_json):
+        if not value.is_file():
+            raise RuntimeError(f'Convocation JSON is missing: {value}')
     client = MongoClient(os.environ.get('YUKU_MONGO_URI', 'mongodb://localhost:27017/'), serverSelectionTimeoutMS=10000)
     try:
         db = client[args.database]
+        if args.recognized_groups not in db.list_collection_names():
+            raise RuntimeError(f'Recognized-groups collection is missing: {args.recognized_groups}')
         current = db.scienti_final_release_publications.find_one({'_id': 'current'}) or {}
         if current.get('current_release') != args.source_release:
             raise RuntimeError('The specified source release is not current')
@@ -206,7 +214,7 @@ def prepare(args, directory):
                   'gruplac_raw': gr['raw_collection'], 'gruplac_state': gr['state_collection']}
         sources = [frozen[k] for k in ('cvlac_raw', 'cvlac_manifest', 'cvlac_state', 'gruplac_raw', 'gruplac_state')]
         sources += [p[k] for k in ('directory_collection', 'recognized_collection', 'open_data_collection')]
-        sources += ['recognized_groups', 'gruplac_groups_data', 'gruplac_production_data']
+        sources += [args.recognized_groups, 'gruplac_groups_data', 'gruplac_production_data']
         frozen['counts'] = {n: db[n].count_documents({}) for n in dict.fromkeys(sources)}
         old = set(source['collections'].values())
         filtered = db.scienti_identified_work_publications.find_one({'_id': 'current'}) or {}
@@ -222,8 +230,8 @@ def prepare(args, directory):
         config = {'run_name': args.run_name, 'snapshot_tag': args.run_name,
                   'publication': {'date': args.publication_date, 'versions': versions},
                   'convocations': {'mode': 'json',
-                      'researchers_json': '/home/fvergara/projects/colav/data/minciencias/investigadores.json',
-                      'groups_json': '/home/fvergara/projects/colav/data/minciencias/grupos.json'},
+                      'researchers_json': str(args.researchers_json.resolve()),
+                      'groups_json': str(args.groups_json.resolve())},
                   'processing': {'confirm_conflicting_dois': True, 'generate_identified_works': True,
                                  'cleanup_transient': True, 'normalization_batch_size': 50,
                                  'graph_batch_size': 500, 'graph_partitions': 64,
@@ -234,7 +242,7 @@ def prepare(args, directory):
                                  'verify_incomplete_gruplac': False},
                   'collections': {'all_researchers': p['directory_collection'],
                                   'recognized_researchers': p['recognized_collection'],
-                                  'recognized_groups': 'recognized_groups',
+                                  'recognized_groups': args.recognized_groups,
                                   'cvlac_raw': frozen['cvlac_raw'],
                                   # Read the frozen GrupLAC HTML in place, without copies.
                                   'gruplac_raw': frozen['gruplac_raw'],
@@ -253,6 +261,12 @@ def main():
     parser.add_argument('--run-name', required=True)
     parser.add_argument('--publication-date', required=True)
     parser.add_argument('--output-dir', type=Path, required=True)
+    # Versioned convocation sources: recognized groups are never rewritten in
+    # place, so a rebuild names the collection and JSON it was derived from.
+    parser.add_argument('--recognized-groups', default='recognized_groups')
+    parser.add_argument('--groups-json', type=Path, default=CONVOCATIONS_DIR / 'grupos.json')
+    parser.add_argument('--researchers-json', type=Path,
+                        default=CONVOCATIONS_DIR / 'investigadores.json')
     parser.add_argument('--worker', action='store_true', help=argparse.SUPPRESS)
     parser.add_argument('--prepare-only', action='store_true')
     args = parser.parse_args()
