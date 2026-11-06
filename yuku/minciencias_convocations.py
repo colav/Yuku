@@ -21,8 +21,8 @@ Uso:
     python procesar_minciencias_pdfs.py /ruta/Convocatorias -o historico.xlsx
 
 Dependencias:
-    Python 3.9+, openpyxl, pdftotext/pdftohtml (poppler-utils) y Ghostscript
-    para abrir temporalmente PDF nativos con restricciones de copia.
+    Python 3.9+, openpyxl, pdftotext/pdftohtml/pdftocairo (poppler-utils) y
+    Ghostscript para abrir temporalmente PDF nativos con restricciones de copia.
 """
 
 from __future__ import annotations
@@ -38,6 +38,7 @@ import sys
 import tempfile
 import unicodedata
 import xml.etree.ElementTree as ET
+from bisect import bisect_right
 from collections import Counter, defaultdict
 from dataclasses import dataclass
 from pathlib import Path
@@ -137,6 +138,21 @@ LIMITES_GRUPOS = {
     (957, 2024): (0.193, 0.378, 0.499, 0.652, 0.707, 0.783),
 }
 
+# Bordes verticales dibujados en las tablas de grupos que se leen por palabras.
+# 2012: código, nombre, líder e instituciones. 2006: código, nombre, tres
+# columnas de institución, líder y categoría.
+BORDES_VERTICALES_GRUPOS = {
+    (359, 2006): 8,
+    (598, 2012): 5,
+}
+
+# Convocatorias cuyo PDF parte palabras al final de línea sin insertar guion
+# (p. ej. "INVESTIGACIONE" + "S DE CAFÉ"). pdftohtml conserva el espacio final
+# de las líneas que terminan en palabra completa; su ausencia marca el corte.
+# Estos documentos no usan partición tipográfica con guion, de modo que un
+# guion final sin espacio es literal ("CARDIOINFANTIL-" + "INSTITUTO").
+CORTE_SIN_ESPACIO = {(957, 2024)}
+
 CLASIFICACIONES = {
     "A1",
     "A",
@@ -228,25 +244,37 @@ def ultimo_no_vacio(
     return ""
 
 
-def unir_fragmentos(fragmentos: Sequence[str]) -> str:
-    """Une líneas de una celda y revierte guiones de partición tipográfica."""
+def unir_fragmentos(
+    fragmentos: Sequence[str], continuas: Sequence[bool] | None = None
+) -> str:
+    """Une líneas de una celda y revierte guiones de partición tipográfica.
+
+    ``continuas[i]`` indica que el fragmento ``i`` termina dentro de una
+    palabra (sin espacio final en la fuente): el siguiente se une sin espacio
+    y sin quitar guiones, porque en ese caso el guion es literal.
+    """
     resultado = ""
-    for fragmento in fragmentos:
+    pegar = False
+    for indice, fragmento in enumerate(fragmentos):
         fragmento = limpiar(fragmento)
         if not fragmento:
             continue
         ultimo = resultado.rsplit(" ", 1)[-1] if resultado else ""
         particion = (
-            resultado.endswith("-")
+            not pegar
+            and resultado.endswith("-")
             and len(ultimo) > 2
             and not ultimo.startswith("-")
             and bool(re.search(r"[A-Za-zÁÉÍÓÚÜÑáéíóúüñ]-$", ultimo))
             and bool(re.match(r"[A-Za-zÁÉÍÓÚÜÑáéíóúüñ]", fragmento))
         )
-        if particion:
+        if pegar:
+            resultado += fragmento
+        elif particion:
             resultado = resultado[:-1] + fragmento
         else:
             resultado = f"{resultado} {fragmento}".strip()
+        pegar = bool(continuas and continuas[indice])
     return limpiar(resultado)
 
 
@@ -270,7 +298,7 @@ def ejecutar(comando: list[str]) -> str:
 def comprobar_dependencias() -> None:
     faltantes = [
         programa
-        for programa in ("pdfinfo", "pdftotext", "pdftohtml", "gs")
+        for programa in ("pdfinfo", "pdftotext", "pdftohtml", "pdftocairo", "gs")
         if not shutil.which(programa)
     ]
     if faltantes:
@@ -531,19 +559,31 @@ def preparar_pdf_xml(fuente: Fuente, temporal: Path) -> Path:
     return xml
 
 
-def elementos_pagina(pagina: ET.Element) -> list[tuple[float, float, str]]:
+def elementos_pagina(
+    pagina: ET.Element,
+) -> list[tuple[float, float, str, bool]]:
+    """Devuelve centro x, borde superior, texto y si la línea queda abierta.
+
+    Una línea queda abierta cuando el texto fuente no termina en espacio y su
+    último carácter es una letra o un guion: indica una palabra cortada al
+    final de la línea (solo se usa en ``CORTE_SIN_ESPACIO``).
+    """
     ancho = float(pagina.attrib["width"])
     alto = float(pagina.attrib["height"])
-    elementos: list[tuple[float, float, str]] = []
+    elementos: list[tuple[float, float, str, bool]] = []
     for elemento in pagina.findall("text"):
-        texto = limpiar("".join(elemento.itertext()))
+        crudo = "".join(elemento.itertext())
+        texto = limpiar(crudo)
         if not texto:
             continue
         izquierda = float(elemento.attrib["left"])
         anchura = float(elemento.attrib["width"])
         centro_x = (izquierda + anchura / 2) / ancho
         arriba = float(elemento.attrib["top"]) / alto
-        elementos.append((centro_x, arriba, texto))
+        abierta = not crudo[-1].isspace() and bool(
+            re.search(r"[A-Za-zÁÉÍÓÚÜÑáéíóúüñ-]$", texto)
+        )
+        elementos.append((centro_x, arriba, texto, abierta))
     return elementos
 
 
@@ -551,6 +591,7 @@ def extraer_grupos_xml(fuente: Fuente, xml: Path) -> list[GrupoFila]:
     clave = (fuente.convocatoria.numero, fuente.convocatoria.año)
     limites = LIMITES_GRUPOS[clave]
     es_2012 = clave == (598, 2012)
+    corte_sin_espacio = clave in CORTE_SIN_ESPACIO
     filas: list[GrupoFila] = []
     raiz = ET.parse(xml).getroot()
 
@@ -559,14 +600,15 @@ def extraer_grupos_xml(fuente: Fuente, xml: Path) -> list[GrupoFila]:
         elementos = elementos_pagina(pagina)
         inicios = [
             indice
-            for indice, (x, _, texto) in enumerate(elementos)
+            for indice, (x, _, texto, _) in enumerate(elementos)
             if x < limites[0] and re.fullmatch(r"COL\d{4,7}", texto, flags=re.I)
         ]
         for posicion, inicio in enumerate(inicios):
             fin = inicios[posicion + 1] if posicion + 1 < len(inicios) else len(elementos)
             celdas: list[list[str]] = [[] for _ in range(len(limites) + 1)]
+            abiertas: list[list[bool]] = [[] for _ in range(len(limites) + 1)]
 
-            for x, arriba, texto in elementos[inicio:fin]:
+            for x, arriba, texto, abierta in elementos[inicio:fin]:
                 if (
                     es_2012
                     and x < limites[0]
@@ -580,10 +622,14 @@ def extraer_grupos_xml(fuente: Fuente, xml: Path) -> list[GrupoFila]:
                 while columna < len(limites) and x >= limites[columna]:
                     columna += 1
                 celdas[columna].append(texto)
+                abiertas[columna].append(abierta)
                 if not es_2012 and columna == 6 and es_clasificacion(texto):
                     break
 
-            valores = [unir_fragmentos(celda) for celda in celdas]
+            valores = [
+                unir_fragmentos(celda, abierta if corte_sin_espacio else None)
+                for celda, abierta in zip(celdas, abiertas)
+            ]
             codigo = re.search(
                 r"COL\d{7}", re.sub(r"\s+", "", valores[0]), flags=re.I
             )
@@ -620,10 +666,15 @@ def extraer_grupos_xml(fuente: Fuente, xml: Path) -> list[GrupoFila]:
     return filas
 
 
-def extraer_grupos_2006(fuente: Fuente, temporal: Path) -> list[GrupoFila]:
+def palabras_tsv(
+    fuente: Fuente, temporal: Path
+) -> dict[int, list[tuple[float, float, float, float, str]]]:
+    """Lee las palabras del PDF: (arriba, izquierda, ancho, alto, texto)."""
     tsv = temporal / f"{fuente.sha256[:12]}.tsv"
     ejecutar(["pdftotext", "-tsv", "-enc", "UTF-8", str(fuente.pdf), str(tsv)])
-    palabras: dict[int, list[tuple[float, float, float, str]]] = defaultdict(list)
+    palabras: dict[int, list[tuple[float, float, float, float, str]]] = defaultdict(
+        list
+    )
     with tsv.open(encoding="utf-8") as archivo:
         encabezado = next(archivo, None)
         if not encabezado:
@@ -641,55 +692,138 @@ def extraer_grupos_2006(fuente: Fuente, temporal: Path) -> list[GrupoFila]:
                         float(campos[7]),
                         float(campos[6]),
                         float(campos[8]),
+                        float(campos[9]),
                         campos[11],
                     )
                 )
             except (TypeError, ValueError):
                 continue
+    return palabras
 
+
+def agrupar_posiciones(valores: Iterable[float], tolerancia: float = 1.0) -> list[float]:
+    """Funde posiciones casi iguales (una regla dibujada en varios tramos)."""
+    posiciones: list[float] = []
+    for valor in sorted(valores):
+        if not posiciones or valor - posiciones[-1] >= tolerancia:
+            posiciones.append(valor)
+    return posiciones
+
+
+def bordes_pagina(
+    fuente: Fuente, pagina: int, temporal: Path
+) -> tuple[list[float], list[float]]:
+    """Devuelve las reglas horizontales (y) y verticales (x) de una página.
+
+    Las tablas dibujan sus bordes como rectángulos rellenos de menos de 1.5 pt
+    de grosor. Se leen del SVG de Poppler, en el mismo sistema de coordenadas
+    que ``pdftotext -tsv``; los glifos quedan dentro de ``<defs>``.
+    """
+    svg = temporal / f"{fuente.sha256[:12]}-bordes-{pagina}.svg"
+    ejecutar(
+        [
+            "pdftocairo",
+            "-svg",
+            "-f",
+            str(pagina),
+            "-l",
+            str(pagina),
+            str(fuente.pdf),
+            str(svg),
+        ]
+    )
+    contenido = svg.read_text(encoding="utf-8").split("</defs>", 1)[-1]
+    svg.unlink()
+    horizontales: list[float] = []
+    verticales: list[float] = []
+    for atributos in re.findall(r"<path\b([^>]*)>", contenido):
+        trazo = re.search(r'\bd="([^"]*)"', atributos)
+        if (
+            not trazo
+            or "transform=" in atributos
+            or not re.search(r'fill="rgb\(0%, ?0%, ?0%\)"', atributos)
+        ):
+            continue
+        numeros = [float(n) for n in re.findall(r"-?\d+(?:\.\d+)?", trazo.group(1))]
+        xs, ys = numeros[0::2], numeros[1::2]
+        if not xs or len(xs) != len(ys):
+            continue
+        ancho, alto = max(xs) - min(xs), max(ys) - min(ys)
+        if ancho > 5 and alto < 1.5:
+            horizontales.append((min(ys) + max(ys)) / 2)
+        elif alto > 5 and ancho < 1.5:
+            verticales.append((min(xs) + max(xs)) / 2)
+    return agrupar_posiciones(horizontales), agrupar_posiciones(verticales)
+
+
+def bordes_verticales_tabla(
+    fuente: Fuente, pagina: int, temporal: Path
+) -> tuple[list[float], list[float]]:
+    """Bordes de una página de tabla, validando el número de columnas."""
+    clave = (fuente.convocatoria.numero, fuente.convocatoria.año)
+    horizontales, verticales = bordes_pagina(fuente, pagina, temporal)
+    if len(verticales) != BORDES_VERTICALES_GRUPOS[clave]:
+        raise RuntimeError(
+            f"{fuente.relativa}: página {pagina}: se esperaban "
+            f"{BORDES_VERTICALES_GRUPOS[clave]} bordes verticales y se "
+            f"encontraron {len(verticales)}"
+        )
+    return horizontales, verticales
+
+
+def columna_por_bordes(verticales: Sequence[float], centro_x: float) -> int | None:
+    """Índice de la columna que contiene ``centro_x`` o None fuera de la tabla."""
+    if not verticales[0] < centro_x < verticales[-1]:
+        return None
+    return bisect_right(verticales, centro_x) - 1
+
+
+def extraer_grupos_2006(fuente: Fuente, temporal: Path) -> list[GrupoFila]:
+    """Extrae la tabla de 2006 por palabras y bordes verticales dibujados.
+
+    La tabla tiene tres columnas de institución entre el nombre y el líder.
+    Cada una se lee por separado y se unen con "; ": leerlas como una sola
+    celda intercalaba sus líneas. Las filas empiezan en la línea del código,
+    porque el texto de cada celda está alineado arriba.
+    """
     resultado: list[GrupoFila] = []
-    for pagina, elementos in palabras.items():
+    for pagina, elementos in palabras_tsv(fuente, temporal).items():
         anclas = sorted(
             [
                 palabra
                 for palabra in elementos
                 if palabra[1] < 130
-                and re.fullmatch(r"COL\d{7}", palabra[3], flags=re.I)
+                and re.fullmatch(r"COL\d{7}", palabra[4], flags=re.I)
             ]
         )
+        if not anclas:
+            continue
+        _, verticales = bordes_verticales_tabla(fuente, pagina, temporal)
         for indice, ancla in enumerate(anclas):
             inicio_y = ancla[0] - 0.5
             fin_y = anclas[indice + 1][0] - 0.5 if indice + 1 < len(anclas) else 700
-            celdas: list[list[tuple[float, float, str]]] = [[] for _ in range(5)]
-            for arriba, izquierda, ancho, texto in elementos:
+            celdas: list[list[tuple[float, float, str]]] = [
+                [] for _ in range(len(verticales) - 1)
+            ]
+            for arriba, izquierda, ancho, _, texto in elementos:
                 if not inicio_y <= arriba < fin_y:
                     continue
-                centro = izquierda + ancho / 2
-                columna = (
-                    0
-                    if centro < 130
-                    else 1
-                    if centro < 260
-                    else 2
-                    if centro < 470
-                    else 3
-                    if centro < 580
-                    else 4
-                )
-                celdas[columna].append((arriba, izquierda, texto))
+                columna = columna_por_bordes(verticales, izquierda + ancho / 2)
+                if columna is not None:
+                    celdas[columna].append((arriba, izquierda, texto))
             valores = [
                 limpiar(" ".join(item[2] for item in sorted(celda))) for celda in celdas
             ]
             categoria = ""
-            match_categoria = re.search(r"\b([ABC])\b", valores[4])
+            match_categoria = re.search(r"\b([ABC])\b", valores[6])
             if match_categoria:
                 categoria = match_categoria.group(1)
             resultado.append(
                 GrupoFila(
-                    codigo=ancla[3].upper(),
+                    codigo=ancla[4].upper(),
                     nombre=valores[1],
-                    lider=valores[3],
-                    instituciones=valores[2],
+                    lider=valores[5],
+                    instituciones="; ".join(valor for valor in valores[2:5] if valor),
                     reconocido="Sí",
                     inscrito_medicion="",
                     clasificacion=categoria,
@@ -719,66 +853,65 @@ def texto_desde_palabras(
 
 
 def extraer_grupos_2012(fuente: Fuente, temporal: Path) -> list[GrupoFila]:
-    """Extrae la tabla de 2012 por palabras y bandas verticales.
+    """Extrae la tabla de 2012 por palabras y por los bordes dibujados.
 
     En algunas filas Poppler combina nombre y líder en un solo bloque XML. El
     TSV por palabra conserva sus coordenadas y permite separarlos sin inferir.
+    El código está centrado verticalmente en su fila y la celda de
+    instituciones suele ser la más alta, así que las filas y columnas se toman
+    de las reglas de la tabla y no de distancias entre códigos.
     """
-    tsv = temporal / f"{fuente.sha256[:12]}-2012.tsv"
-    ejecutar(["pdftotext", "-tsv", "-enc", "UTF-8", str(fuente.pdf), str(tsv)])
-    palabras: dict[int, list[tuple[float, float, float, str]]] = defaultdict(list)
-    with tsv.open(encoding="utf-8") as archivo:
-        next(archivo, None)
-        for linea in archivo:
-            campos = linea.rstrip("\r\n").split("\t", 11)
-            if len(campos) != 12 or campos[0] != "5":
-                continue
-            try:
-                palabras[int(campos[1])].append(
-                    (float(campos[7]), float(campos[6]), float(campos[8]), campos[11])
-                )
-            except (TypeError, ValueError):
-                continue
-
     resultado: list[GrupoFila] = []
-    for pagina, elementos in palabras.items():
+    for pagina, elementos in palabras_tsv(fuente, temporal).items():
         anclas = sorted(
             [
                 palabra
                 for palabra in elementos
                 if palabra[1] < 140
-                and re.fullmatch(r"COL\d{7}", palabra[3], flags=re.I)
+                and re.fullmatch(r"COL\d{7}", palabra[4], flags=re.I)
             ]
         )
-        posiciones_y = [ancla[0] for ancla in anclas]
-        for indice, ancla in enumerate(anclas):
-            inicio_y = (
-                (posiciones_y[indice - 1] + posiciones_y[indice]) / 2
-                if indice
-                else posiciones_y[indice]
-                - (posiciones_y[indice + 1] - posiciones_y[indice]) / 2
-                if len(posiciones_y) > 1
-                else posiciones_y[indice] - 20
-            )
-            fin_y = (
-                (posiciones_y[indice] + posiciones_y[indice + 1]) / 2
-                if indice + 1 < len(posiciones_y)
-                else posiciones_y[indice]
-                + (posiciones_y[indice] - posiciones_y[indice - 1]) / 2
-                if len(posiciones_y) > 1
-                else posiciones_y[indice] + 20
-            )
-            celdas: list[list[tuple[float, float, str]]] = [[] for _ in range(4)]
-            for arriba, izquierda, ancho, texto in elementos:
-                if not inicio_y <= arriba < fin_y:
-                    continue
-                centro = izquierda + ancho / 2
-                columna = 0 if centro < 138 else 1 if centro < 285 else 2 if centro < 395 else 3
-                celdas[columna].append((arriba, izquierda, texto))
-            valores = [texto_desde_palabras(celda) for celda in celdas]
+        if not anclas:
+            continue
+        horizontales, verticales = bordes_verticales_tabla(fuente, pagina, temporal)
+        filas_tabla = list(zip(horizontales, horizontales[1:]))
+
+        def fila_de(centro_y: float) -> tuple[float, float] | None:
+            for fila in filas_tabla:
+                if fila[0] <= centro_y < fila[1]:
+                    return fila
+            return None
+
+        anclas_por_fila: dict[tuple[float, float], tuple] = {}
+        for ancla in anclas:
+            fila = fila_de(ancla[0] + ancla[3] / 2)
+            if fila is None or fila in anclas_por_fila:
+                raise RuntimeError(
+                    f"{fuente.relativa}: página {pagina}: el código {ancla[4]} "
+                    "no ocupa una fila propia de la tabla"
+                )
+            anclas_por_fila[fila] = ancla
+        primera, ultima = min(anclas_por_fila), max(anclas_por_fila)
+        celdas: dict[tuple[float, float], list[list[tuple[float, float, str]]]] = {
+            fila: [[] for _ in range(len(verticales) - 1)] for fila in anclas_por_fila
+        }
+        for arriba, izquierda, ancho, alto, texto in elementos:
+            columna = columna_por_bordes(verticales, izquierda + ancho / 2)
+            fila = fila_de(arriba + alto / 2)
+            if columna is None or fila is None:
+                continue
+            if fila in celdas:
+                celdas[fila][columna].append((arriba, izquierda, texto))
+            elif primera < fila < ultima:
+                raise RuntimeError(
+                    f"{fuente.relativa}: página {pagina}: texto {texto!r} en una "
+                    "fila sin código"
+                )
+        for fila in sorted(anclas_por_fila):
+            valores = [texto_desde_palabras(celda) for celda in celdas[fila]]
             resultado.append(
                 GrupoFila(
-                    codigo=ancla[3].upper(),
+                    codigo=anclas_por_fila[fila][4].upper(),
                     nombre=valores[1],
                     lider=valores[2],
                     instituciones=valores[3],
@@ -1395,7 +1528,7 @@ def configurar_hoja(hoja, encabezados: Sequence[str]) -> None:
     fuente = Font(color="FFFFFF", bold=True)
     alineacion = Alignment(horizontal="center", vertical="center", wrap_text=True)
     hoja.freeze_panes = "A2"
-    hoja.auto_filter.ref = f"A1: {get_column_letter(len(encabezados))}1"
+    hoja.auto_filter.ref = f"A1:{get_column_letter(len(encabezados))}1"
     celdas = []
     for encabezado in encabezados:
         celda = WriteOnlyCell(hoja, value=encabezado)
