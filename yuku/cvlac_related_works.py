@@ -5,7 +5,9 @@ import re
 import unicodedata
 from typing import Any
 
-from bs4 import BeautifulSoup
+from bs4 import BeautifulSoup, Comment, NavigableString, Tag
+from yuku.scienti_types import classify_native, native_type
+from yuku.scienti_events import normalize_event_type
 
 
 SCIENTI_CVLAC_URL = "https://scienti.minciencias.gov.co/cvlac/visualizador/generarCurriculoCv.do?cod_rh="
@@ -20,20 +22,41 @@ ALLOWED_SECTION_ALIASES = {
     "publicaciones editoriales no especializadas": "Publicaciones editoriales no especializadas",
     "patentes": "Patentes",
     "textos en publicaciones no cientificas": "Publicaciones editoriales no especializadas",
+    # Sections already reviewed in the shared scraping catalog (GrupLAC).
+    "documentos de trabajo": "Documentos de trabajo",
+    "traducciones": "Traducciones",
+    "traducciones filologicas y edicion de fuentes": "Traducciones Filológicas y Edición de Fuentes",
+    "manuales y guias especializadas": "Manuales y Guías Especializadas",
 }
 
 DOI_RE = re.compile(r"\b10\.\d{4,9}/[^\s<>\"{}|\\^`\[\]]+", re.IGNORECASE)
 YEAR_RE = re.compile(r"(?<!\d)(19\d{2}|20\d{2})(?!\d)")
 ISSN_RE = re.compile(r"\bISSN\s*:\s*([\dXx]{4}-?[\dXx]{3}[\dXx])", re.IGNORECASE)
-ISBN_RE = re.compile(r"\bISBN\s*:\s*([0-9Xx](?:[0-9Xx]-?){8,16}[0-9Xx])", re.IGNORECASE)
-VALID_PAGES_RE = re.compile(r"^[0-9]+(?:\s*-\s*[0-9]+)?$")
+ISBN_VALUE = r"[0-9Xx](?:-?[0-9Xx]){9,16}"
+ISSN_VALUE = r"[\dXx]{4}-?[\dXx]{3}[\dXx]"
+ISBN_RE = re.compile(r"\bISBN\s*:\s*(" + ISBN_VALUE + ")", re.IGNORECASE)
+# Identifier values contain year-like digit runs (ISSN 1989-208X, DOI 2019.01).
+IDENTIFIER_SPAN_RE = re.compile(
+    r"\b(?:ISSN\s*:\s*" + ISSN_VALUE + r"|ISBN\s*:\s*" + ISBN_VALUE + r")"
+    r"|\b10\.\d{4,9}/[^\s,;<>\"]+|\bhttps?://[^\s,;<>\"]+",
+    re.IGNORECASE,
+)
+PAGE_TOKEN = r"[A-Za-z]?[0-9]+[A-Za-z]?"  # e0123, S56, newspaper 6A
+VALID_PAGES_RE = re.compile(r"^" + PAGE_TOKEN + r"(?:\s*-\s*" + PAGE_TOKEN + r")?$")
 VALID_LANGUAGE_RE = re.compile(r"^[^\W\d_]+(?:[ /-][^\W\d_]+){0,5}$")
 SUSPICIOUS_PUBLISHER_RE = re.compile(
     r"^(?:Autores\s*:|v\.(?=\s|:|$)|(?:vol|p[aá]gs?)\.?(?=\s|:|$)|"
     r"isbn\b|issn\b|"
-    r"[0-9Xx](?:[0-9Xx]-?){8,16}[0-9Xx]$)",
+    r"[0-9Xx](?:-?[0-9Xx]){8,16}$)",
     re.IGNORECASE,
 )
+SUSPICIOUS_PUBLICATION_PLACE_RE = re.compile(
+    r"^(?:(?:19|20)\d{2}|(?:ISBN|ISSN|Autores?|Edici[oó]n|Serie)\b)",
+    re.IGNORECASE,
+)
+
+# Labels that follow an empty "v." slot are not volumes ("v. pags. Areas:").
+VOLUME_LABEL_WORDS = {"p", "pag", "pags", "paginas", "fasc", "areas", "sectores", "palabras"}
 
 LABEL_ALIASES = {
     "nombre del producto": "product_name",
@@ -49,6 +72,8 @@ LABEL_ALIASES = {
     "tutor(es)/cotutor(es)": "tutors",
     "isbn": "isbn_label",
     "editorial": "publisher",
+    "nombre de la revista": "journal_name",
+    "revista": "journal_name",
     "edicion": "edition",
     "numero de edicion": "edition",
     "numero de paginas": "pages",
@@ -201,7 +226,7 @@ def split_areas(value: str) -> list[str]:
 
 
 def normalize_isbn(value: str) -> str:
-    match = re.search(r"[0-9Xx](?:[0-9Xx]-?){8,16}[0-9Xx]", value or "")
+    match = re.search(ISBN_VALUE, value or "")
     return match.group(0).upper() if match else ""
 
 
@@ -334,7 +359,7 @@ def extract_product_type(section_title: str, blockquote) -> str:
             b = previous_tr.find("b")
             if b:
                 candidate = clean_text(b.get_text(" ", strip=True))
-                if candidate and not candidate.endswith(":"):
+                if candidate and native_type(candidate, section_title)["native"]:
                     return candidate
 
     if norm_text(section_title) == "patentes":
@@ -342,31 +367,11 @@ def extract_product_type(section_title: str, blockquote) -> str:
 
     detail_text = clean_text(blockquote.get_text(" ", strip=True))
     inline_type = extract_inline_type(detail_text)
-    return inline_type or section_title
+    return inline_type if native_type(inline_type, section_title)["native"] else section_title
 
 
 def classify_target_category(section_title: str, product_type: str) -> str:
-    section_n = norm_text(section_title)
-    product_n = norm_text(product_type)
-    blob_n = f"{section_n} | {product_n}"
-
-    if section_n == "trabajos dirigidos/tutorias":
-        if any(token in blob_n for token in ["tesis de doctorado", "trabajo de grado de maestria", "especialidad clinica"]):
-            return "Tesis de posgrado"
-        if any(token in blob_n for token in ["trabajos de grado de pregrado", "tesis de pregrado"]):
-            return "Tesis de pregrado"
-        return "Trabajos dirigidos/tutorias"
-    if section_n == "articulos":
-        return "Articulo de revista"
-    if section_n == "capitulos de libro":
-        return "Capitulo de libro"
-    if section_n in {"libros", "libros de divulgacion y/o compilacion de divulgacion", "libro de formacion"}:
-        return "Libro"
-    if section_n in {"publicaciones editoriales no especializadas", "textos en publicaciones no cientificas"}:
-        return "Publicaciones editoriales no especializadas"
-    if section_n == "patentes":
-        return "Patente"
-    return section_title
+    return classify_native(product_type, section_title)
 
 
 def normalize_advisor_role(value: str) -> str:
@@ -501,12 +506,12 @@ def extract_pages(text: str, source_fields: dict[str, str]) -> tuple[str, str, s
     if not value:
         match = re.search(
             r"\bp(?:(?:[aá]gs?)|(?:[aá]ginas))?\.\s*:?[ ]*"
-            r"([0-9]+(?:\s*-\s*[0-9]+)?)",
+            r"(" + PAGE_TOKEN + r"(?:\s*-\s*" + PAGE_TOKEN + r")?)\b",
             text or "",
             flags=re.IGNORECASE,
         )
         value = clean_pages_value(match.group(1)) if match else ""
-    numbers = re.fullmatch(r"([0-9]+)(?:\s*-\s*([0-9]+))?", value)
+    numbers = re.fullmatch(r"(" + PAGE_TOKEN + r")(?:\s*-\s*(" + PAGE_TOKEN + r"))?", value)
     if not numbers:
         return value, "", ""
     start = numbers.group(1)
@@ -523,11 +528,12 @@ def extract_volume(text: str) -> str:
         r"\bv\.\s*:?\s*([^,;]*?)"
         r"(?=\s*,?\s*(?:fasc\.?|ISBN|ISSN|DOI|ed|Editorial)\s*:|"
         r"\s*,?\s*p(?:[aá]gs?|[aá]ginas)?\.?\s*:?(?=\s*(?:\d|[,;]|$))|"
-        r"\s*,?\s*(?:19|20)\d{2}\b|$)",
+        r"\s*,?\s*(?:19|20)\d{2}\b|\s+(?:Palabras|Areas|Sectores)\s*:|$)",
         text or "",
         flags=re.IGNORECASE,
     )
-    return clean_bibliographic_value(match.group(1)) if match else ""
+    value = clean_bibliographic_value(match.group(1)) if match else ""
+    return "" if norm_text(value) in VOLUME_LABEL_WORDS else value
 
 
 def extract_title(
@@ -577,9 +583,19 @@ def extract_title(
         if title:
             return title
 
-    quoted = re.search(r'"([^"\n]{3,500})"', text)
+    quoted = None
+    if norm_text(section_title) != "capitulos de libro":
+        # Chapters put the book title between the closing quote and "En:".
+        quoted = re.search(r'"([^\n]{3,500}?)"\s*\.?\s*En\s*:', text)
+    quoted = quoted or re.search(r'"([^"\n]{3,500})"', text)
     if quoted:
-        return strip_value(quoted.group(1))
+        title = strip_value(quoted.group(1))
+        if title.count('"') % 2:
+            # Drop only an unpaired edge quote left by malformed source quoting.
+            title = strip_value(title.strip('"'))
+        while len(title) > 2 and title[0] == title[-1] == '"' and '"' not in title[1:-1]:
+            title = strip_value(title[1:-1])  # doubled source quoting
+        return title
 
     if "Estado:" in text and "," in text:
         after_first_author = text.split(",", 1)[1]
@@ -676,6 +692,11 @@ def extract_authors(
     return split_people(prefix)
 
 
+def remove_identifier_spans(text: str) -> str:
+    """Blank ISSN/ISBN/DOI/URL values so their digits are never read as years."""
+    return IDENTIFIER_SPAN_RE.sub(" ", text or "")
+
+
 def extract_year(text: str, fields: dict[str, Any]) -> int | None:
     presentation_date = str(fields.get("presentation_date", ""))
     match = re.search(r"(19\d{2}|20\d{2})", presentation_date)
@@ -683,6 +704,7 @@ def extract_year(text: str, fields: dict[str, Any]) -> int | None:
         return int(match.group(1))
 
     main_text = re.split(r"\bDOI\s*:", text, maxsplit=1, flags=re.IGNORECASE)[0]
+    main_text = remove_identifier_spans(main_text)
     priority_patterns = [
         r",\s*(19\d{2}|20\d{2})\s*,?\s*(?:Palabras\s*:|Areas\s*:|Sectores\s*:|$)",
         r",\s*(19\d{2}|20\d{2})\s*,?\s*$",
@@ -699,6 +721,18 @@ def extract_year(text: str, fields: dict[str, Any]) -> int | None:
     return plausible_years[-1] if plausible_years else (years[-1] if years else None)
 
 
+def line_bounded_text(node) -> str:
+    """Return the node text keeping only <br> as line boundaries."""
+    parts: list[str] = []
+    for item in node.descendants:
+        if isinstance(item, Tag):
+            if item.name == "br":
+                parts.append("\n")
+        elif isinstance(item, NavigableString) and not isinstance(item, Comment):
+            parts.append(str(item))
+    return "\n".join(clean_text(line) for line in " ".join(parts).split("\n"))
+
+
 def parse_blockquote(profile_id: str, section_title: str, blockquote, profile_author_name: str = "") -> dict[str, Any]:
     text = clean_text(blockquote.get_text(" ", strip=True))
     fields = parse_labeled_fields(text)
@@ -709,7 +743,7 @@ def parse_blockquote(profile_id: str, section_title: str, blockquote, profile_au
     type_impactu = classify_target_category(section_title, product_type)
     book_related = type_impactu in {
         "Libro",
-        "Capitulo de libro",
+        "Capítulo de libro",
         "Publicaciones editoriales no especializadas",
     }
     directed_title = ""
@@ -728,6 +762,12 @@ def parse_blockquote(profile_id: str, section_title: str, blockquote, profile_au
     is_patent = norm_text(section_title) == "patentes"
     pages, start_page, end_page = extract_pages(text, source_fields)
     publication_place = strip_value(source_fields.get("publication_place", ""))
+    country = extract_country(line_bounded_text(blockquote))
+    if not publication_place and not is_patent:
+        # Same rule as GrupLAC: the bounded "En:" country slot is the place.
+        publication_place = country
+    if SUSPICIOUS_PUBLICATION_PLACE_RE.match(publication_place):
+        publication_place = ""
 
     record = {
         "profile_id": profile_id,
@@ -739,7 +779,7 @@ def parse_blockquote(profile_id: str, section_title: str, blockquote, profile_au
         "title": title,
         "year": extract_year(text, fields),
         "affiliation": directed_affiliation or extract_affiliation(text, fields),
-        "country": extract_country(text),
+        "country": country,
         "publication_place": publication_place,
         "publisher": extract_publisher(text, source_fields) if book_related else "",
         "book_title": extract_book_title(text, source_fields, section_title),
@@ -765,6 +805,14 @@ def parse_blockquote(profile_id: str, section_title: str, blockquote, profile_au
         "status": source_fields.get("status", ""),
         "raw_text": text,
     }
+    previous_row = blockquote.find_parent("tr")
+    previous_row = previous_row.find_previous_sibling("tr") if previous_row else None
+    if previous_row and not previous_row.find("blockquote"):
+        bold = previous_row.find("b")
+        candidate = clean_text(bold.get_text(" ", strip=True)) if bold else ""
+        if candidate and not native_type(candidate, section_title)["native"]:
+            record["type_findings"] = [{"reason": "previous_bold_text_is_not_a_catalog_type",
+                                        "raw_type": candidate, "source_section": section_title}]
     if is_patent:
         applicant = source_fields.get("patent_applicant") or extract_patent_applicant(
             text, fields
@@ -794,6 +842,13 @@ def parse_blockquote(profile_id: str, section_title: str, blockquote, profile_au
             section_title,
             profile_author_name,
         )
+    if norm_text(type_impactu) == "articulo de revista":
+        from yuku.scienti_journals import journal_context
+        record.update(journal_context(text, title, source_fields=source_fields,
+                                      country=record["country"]))
+    else:
+        from yuku.scienti_journals import enrich_editorial_medium
+        enrich_editorial_medium(record)
     return record
 
 
@@ -1145,7 +1200,7 @@ def parse_event_row(
         "type_impactu": "Evento",
         "order": int(main.group("order")),
         "title": strip_value(main.group("title")),
-        "event_type": strip_value(main.group("event_type")),
+        "event_type": normalize_event_type(strip_value(main.group("event_type"))),
         "scope": strip_value(main.group("scope")),
         "profile_name": profile_author_name,
         "raw_text": text,

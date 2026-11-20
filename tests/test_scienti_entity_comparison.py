@@ -7,8 +7,10 @@ from kahi_impactu_type_catalog import get_impactu_catalog
 from yuku.scienti_entities import ENTITY_KEYS, ENTITY_NORMALIZER_VERSION, ENTITY_RUNS, _timestamp
 from yuku.scienti_entity_comparison import (
     ENTITY_COMPARISONS,
+    SNAPSHOT_REFRESH_NORMALIZER_VERSIONS,
     ScientiEntityVersionComparator,
     _old_timestamp,
+    _snapshot_refresh_versions,
 )
 
 
@@ -112,7 +114,7 @@ class ScientiEntityVersionComparatorTests(unittest.TestCase):
                 {}, {"$set": {"source_metadata.normalizer_version": "scienti-entity-normalizer-v2"}}
             )
             self.db[self.new_destinations[entity]].update_one(
-                {}, {"$set": {"source_metadata.role_resolutions": []}}
+                {}, {"$set": {"source_metadata.role_resolutions": [], "source_metadata.normalizer_version": "scienti-entity-normalizer-v3"}}
             )
         self.db[self.old_destinations["works"]].update_one(
             {}, {"$set": {"authors": [], "author_count": 0}}
@@ -142,7 +144,7 @@ class ScientiEntityVersionComparatorTests(unittest.TestCase):
         new_work["updated"][0]["time"] = 2
         new_work["authors"] = [old_work["authors"][0]]
         new_work["author_count"] = 1
-        new_work["source_metadata"]["normalizer_version"] = ENTITY_NORMALIZER_VERSION
+        new_work["source_metadata"]["normalizer_version"] = "scienti-entity-normalizer-v3"
         new_work["source_metadata"]["role_resolutions"] = [{
             "rule": "student_precedence_exact_name",
             "name": "ANA ESTUDIANTE",
@@ -161,7 +163,7 @@ class ScientiEntityVersionComparatorTests(unittest.TestCase):
         self.db[self.old_destinations["events"]].replace_one({"_id": old_event["_id"]}, old_event)
         new_event = deepcopy(old_event)
         new_event["updated"][0]["time"] = 2
-        new_event["source_metadata"]["normalizer_version"] = ENTITY_NORMALIZER_VERSION
+        new_event["source_metadata"]["normalizer_version"] = "scienti-entity-normalizer-v3"
         new_event["source_metadata"]["role_resolutions"] = []
         occurrence = new_event["source_metadata"]["occurrences"][0]
         occurrence["metadata"]["end_date"] = None
@@ -189,7 +191,7 @@ class ScientiEntityVersionComparatorTests(unittest.TestCase):
         new_event = deepcopy(old_event)
         new_event["_id"] = "reidentified-event"
         new_event["updated"][0]["time"] = 2
-        new_event["source_metadata"]["normalizer_version"] = ENTITY_NORMALIZER_VERSION
+        new_event["source_metadata"]["normalizer_version"] = "scienti-entity-normalizer-v3"
         new_event["source_metadata"]["role_resolutions"] = []
         new_event["source_metadata"]["identity_key"] = "source|events|cvlac|0000000001|0|registro"
         new_event["source_metadata"]["identity_rule"] = "source_scoped_insufficient_anchors"
@@ -232,7 +234,7 @@ class ScientiEntityVersionComparatorTests(unittest.TestCase):
             )
             self.db[self.new_destinations[entity]].update_one(
                 {}, {"$set": {
-                    "source_metadata.normalizer_version": ENTITY_NORMALIZER_VERSION,
+                    "source_metadata.normalizer_version": "scienti-entity-normalizer-v4",
                     "source_metadata.router_version": "scienti-exact-router-v5",
                     "source_metadata.type_catalog_version": IMPACTU_CATALOG.version,
                     "source_metadata.type_catalog_sha256": IMPACTU_CATALOG.source_sha256,
@@ -243,7 +245,7 @@ class ScientiEntityVersionComparatorTests(unittest.TestCase):
                 "cvlac_exact_thesis_type",
                 "Trabajos dirigidos/Tutorías - Trabajos de grado de pregrado",
                 "Trabajos dirigidos/tutorias",
-                "Tesis de Pregrado",
+                "Tesis de pregrado",
             ),
             "projects": (
                 "cvlac_exact_project_type",
@@ -364,11 +366,11 @@ class ScientiEntityVersionComparatorTests(unittest.TestCase):
                     {
                         "provenance": "scienti",
                         "source": "impactu",
-                        "type": "Articulo de revista",
+                        "type": "Artículo de revista",
                     },
                 ],
                 "source_metadata": {
-                    "normalizer_version": ENTITY_NORMALIZER_VERSION,
+                    "normalizer_version": "scienti-entity-normalizer-v4",
                     "router_version": "scienti-exact-router-v5",
                     "type_catalog_version": IMPACTU_CATALOG.version,
                     "type_catalog_sha256": IMPACTU_CATALOG.source_sha256,
@@ -458,7 +460,7 @@ class ScientiEntityVersionComparatorTests(unittest.TestCase):
         self.db[ENTITY_RUNS].update_one(
             {"_id": "entities_old"},
             {"$set": {
-                "config.normalizer_version": ENTITY_NORMALIZER_VERSION,
+                "config.normalizer_version": "scienti-entity-normalizer-v4",
                 "config.router_version": "scienti-exact-router-v5",
             }},
         )
@@ -466,7 +468,7 @@ class ScientiEntityVersionComparatorTests(unittest.TestCase):
             self.db[self.old_destinations[entity]].update_one(
                 {},
                 {"$set": {
-                    "source_metadata.normalizer_version": ENTITY_NORMALIZER_VERSION,
+                    "source_metadata.normalizer_version": "scienti-entity-normalizer-v4",
                     "source_metadata.router_version": "scienti-exact-router-v5",
                     "source_metadata.type_catalog_version": IMPACTU_CATALOG.version,
                     "source_metadata.type_catalog_sha256": IMPACTU_CATALOG.source_sha256,
@@ -480,7 +482,7 @@ class ScientiEntityVersionComparatorTests(unittest.TestCase):
             "_id": "removed-event",
             "updated": [{"source": "scienti", "time": 1}],
             "source_metadata": {
-                "normalizer_version": ENTITY_NORMALIZER_VERSION,
+                "normalizer_version": "scienti-entity-normalizer-v4",
                 "router_version": "scienti-exact-router-v5",
             },
         })
@@ -492,6 +494,56 @@ class ScientiEntityVersionComparatorTests(unittest.TestCase):
         self.assertEqual(result["metrics"]["projects"]["modified_documents"], 1)
         self.assertEqual(result["metrics"]["events"]["removed_documents"], 1)
         self.assertEqual(result["metrics"]["events"]["added_documents"], 1)
+
+    def test_previous_normalizer_snapshot_refresh_passes(self):
+        # Production 2026-11-03: v5 (current) -> v6 fell into the legacy
+        # profile and flagged every document as critical.
+        from yuku.scraping_type_catalog import catalog_identity
+        from yuku.scienti_routing import ENTITY_ROUTER_VERSION
+
+        previous = SNAPSHOT_REFRESH_NORMALIZER_VERSIONS[-2]
+        sides = (
+            ("entities_old", self.old_destinations, previous, {}),
+            ("entities_new", self.new_destinations, ENTITY_NORMALIZER_VERSION,
+             {"source_metadata.scraping_type_catalog": catalog_identity()}),
+        )
+        for run_name, destinations, version, extra in sides:
+            self.db[ENTITY_RUNS].update_one(
+                {"_id": run_name},
+                {"$set": {
+                    "config.normalizer_version": version,
+                    "config.router_version": ENTITY_ROUTER_VERSION,
+                }},
+            )
+            for entity in ENTITY_KEYS:
+                self.db[destinations[entity]].update_many(
+                    {},
+                    {"$set": {
+                        "source_metadata.normalizer_version": version,
+                        "source_metadata.router_version": ENTITY_ROUTER_VERSION,
+                        **extra,
+                    }},
+                )
+        self.db[self.new_destinations["works"]].update_one(
+            {}, {"$set": {"titles.0.title": "Titulo corregido por el parser"}}
+        )
+
+        result = self._run("previous_normalizer_refresh")
+
+        self.assertEqual(result["transition_profile"], "snapshot_refresh")
+        self.assertEqual(result["finding_counts"], {})
+        self.assertEqual(result["status"], "passed")
+        self.assertEqual(result["metrics"]["works"]["modified_documents"], 1)
+
+    def test_current_normalizer_is_a_known_snapshot_refresh_target(self):
+        # Bumping ENTITY_NORMALIZER_VERSION without deciding how to compare
+        # against the published snapshot must fail here, not in production.
+        self.assertEqual(SNAPSHOT_REFRESH_NORMALIZER_VERSIONS[-1], ENTITY_NORMALIZER_VERSION)
+        previous = SNAPSHOT_REFRESH_NORMALIZER_VERSIONS[-2]
+        self.assertTrue(_snapshot_refresh_versions(previous, ENTITY_NORMALIZER_VERSION))
+        self.assertTrue(_snapshot_refresh_versions(ENTITY_NORMALIZER_VERSION, ENTITY_NORMALIZER_VERSION))
+        self.assertFalse(_snapshot_refresh_versions(ENTITY_NORMALIZER_VERSION, previous))
+        self.assertFalse(_snapshot_refresh_versions("scienti-entity-normalizer-v3", ENTITY_NORMALIZER_VERSION))
 
 
 if __name__ == "__main__":
